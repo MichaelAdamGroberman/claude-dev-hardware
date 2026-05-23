@@ -919,6 +919,214 @@ static void drawMoodParticles(uint32_t t, int n, int speed) {
   }
 }
 
+// ── Enrichments — extra gear and decorations layered onto the base bot ─
+
+// Headphones — arched band over the head with two ear-cups + red foam.
+// Drawn AFTER the head so it overlays. Tracks face-plane offset so it
+// rides with head rotation.
+static void drawHeadphones() {
+  int fx = faceOffX();
+  int fy = faceOffY();
+  int cx = HX + fx;
+  // Band sweeps from upper-left to upper-right of the head
+  int topY = HY - HH/2 + fy - 6;
+  for (int i = -22; i <= 22; i++) {
+    // parabolic arc — y = topY - (1 - (i/22)^2) * 4
+    float n = (float)i / 22.0f;
+    int yOff = (int)((1.0f - n * n) * 4.0f);
+    _t->drawPixel(cx + i, topY - yOff, STEEL);
+    _t->drawPixel(cx + i, topY - yOff + 1, STEEL);
+  }
+  // Ear cups — fixed (don't rotate with face) so they read like real cans
+  int eY = HY - 4 + fy;
+  _t->fillRect(cx - 28, eY,     6, 12, STEEL);
+  _t->fillRect(cx + 22, eY,     6, 12, STEEL);
+  // Red foam ring stripe (visible because slightly inset)
+  _t->fillRect(cx - 23, eY + 4, 1, 4, CRIMSON);
+  _t->fillRect(cx + 22, eY + 4, 1, 4, CRIMSON);
+  // Subtle highlight on the cups
+  _t->drawPixel(cx - 28, eY,     SPECULAR);
+  _t->drawPixel(cx + 27, eY,     SPECULAR);
+}
+
+// Small hands at the chest area — used when typing.
+// Two stubby grey circles either side of the laptop, with thin arms back
+// to the chest body.
+static void drawHandsAtLaptop() {
+  int cx = HX;
+  int hy = HY + 38;
+  // Arms (thin chassis-color stubs)
+  _t->drawLine(cx - 20, HY + 30, cx - 14, hy - 2, CHASSIS_SH);
+  _t->drawLine(cx - 19, HY + 30, cx - 13, hy - 2, CHASSIS_SH);
+  _t->drawLine(cx + 20, HY + 30, cx + 14, hy - 2, CHASSIS_SH);
+  _t->drawLine(cx + 19, HY + 30, cx + 13, hy - 2, CHASSIS_SH);
+  // Hands (circles)
+  _t->fillCircle(cx - 14, hy, 3, CHASSIS);
+  _t->drawCircle(cx - 14, hy, 3, CHASSIS_SH);
+  _t->drawPixel(cx - 15, hy - 1, CHASSIS_HI);
+  _t->fillCircle(cx + 14, hy, 3, CHASSIS);
+  _t->drawCircle(cx + 14, hy, 3, CHASSIS_SH);
+  _t->drawPixel(cx + 13, hy - 1, CHASSIS_HI);
+}
+
+// Tiny laptop sat in front of gr0m, glowing green screen with fake code.
+// Drawn between chest and bottom edge of screen so it reads as "on lap".
+static void drawLaptop(uint32_t t) {
+  int cx = HX;
+  int kx = cx - 20, ky = HY + 36;  // keyboard base
+  int kw = 40, kh = 3;
+  // Keyboard base + lip
+  _t->fillRect(kx, ky, kw, kh, 0x3186);
+  _t->drawFastHLine(kx, ky + kh, kw, INK);
+  // Key hint dots
+  for (int i = 0; i < 8; i++) _t->drawPixel(kx + 3 + i * 5, ky + 1, 0x7BEF);
+  // Hinge
+  _t->drawFastHLine(kx + 2, ky - 1, kw - 4, 0x52AA);
+  // Screen bezel
+  int sx = kx + 4, sy = ky - 14;
+  int sw = kw - 8, sh = 13;
+  _t->fillRect(sx, sy, sw, sh, INK);
+  _t->fillRect(sx + 1, sy + 1, sw - 2, sh - 2, 0x0660);
+  // Fake code lines — light green pixels in a vague pattern
+  _t->drawFastHLine(sx + 2, sy + 2, 6, 0x07E0);
+  _t->drawFastHLine(sx + 9, sy + 2, 4, 0x07E0);
+  _t->drawFastHLine(sx + 2, sy + 4, 3, 0x07E0);
+  _t->drawFastHLine(sx + 6, sy + 4, 8, 0x07E0);
+  _t->drawFastHLine(sx + 2, sy + 6, 10, 0x07E0);
+  _t->drawFastHLine(sx + 13, sy + 6, 2, 0x07E0);
+  _t->drawFastHLine(sx + 2, sy + 8, 5, 0x07E0);
+  // Blinking cursor
+  if ((t / 2) & 1) _t->fillRect(sx + 14, sy + 8, 2, 1, SPECULAR);
+}
+
+// Speech bubble pointing at gr0m's head. White rounded rect with black
+// outline and a tail. Text rendered in `textColor`. Position auto-clamps
+// to keep the bubble inside the 135px-wide screen, even with long text.
+static void drawSpeechBubble(const char* text, uint16_t textColor) {
+  int len = 0; while (text[len]) len++;
+  int w = len * 6 + 6;
+  // Place to the upper-right of the head, but clamp so right edge ≤ 134.
+  int x = HX + 30;
+  if (x + w > 134) x = 134 - w;
+  if (x < 1) x = 1;
+  int y = HY - 28;
+  if (y < 1) y = 1;
+  // body
+  _t->fillRoundRect(x, y, w, 12, 2, SPECULAR);
+  _t->drawRoundRect(x, y, w, 12, 2, INK);
+  // tail (always points left-down toward the head)
+  _t->fillTriangle(x + 3, y + 11, x + 9, y + 11, x, y + 16, SPECULAR);
+  _t->drawLine(x + 3, y + 11, x, y + 16, INK);
+  _t->drawLine(x + 9, y + 11, x, y + 16, INK);
+  // text
+  _t->setTextSize(1);
+  _t->setTextColor(textColor, SPECULAR);
+  _t->setCursor(x + 3, y + 3);
+  _t->print(text);
+}
+
+// Party hat — pointy triangle on top of head with stripes and a pom.
+static void drawPartyHat() {
+  int fx = faceOffX();
+  int fy = faceOffY();
+  int hx = HX + fx;
+  int hy = HY - HH/2 + fy;
+  _t->fillTriangle(hx, hy - 18, hx - 10, hy - 2, hx + 10, hy - 2, CRIMSON);
+  _t->drawTriangle(hx, hy - 18, hx - 10, hy - 2, hx + 10, hy - 2, INK);
+  // Stripes
+  _t->drawLine(hx - 5, hy - 9, hx + 5, hy - 9, SPECULAR);
+  _t->drawLine(hx - 7, hy - 5, hx + 7, hy - 5, SPECULAR);
+  // Pom pom
+  _t->fillCircle(hx, hy - 19, 2, 0xFFE0);
+  _t->drawPixel(hx, hy - 20, SPECULAR);
+}
+
+// Nightcap — drooping cap that hangs to the right, white trim band, pom.
+static void drawNightcap() {
+  int fx = faceOffX();
+  int fy = faceOffY();
+  int hx = HX + fx;
+  int hy = HY - HH/2 + fy;
+  // White trim band wrapping the head top
+  _t->fillRect(hx - 24, hy - 1, 48, 4, SPECULAR);
+  _t->drawFastHLine(hx - 24, hy - 1, 48, 0xC638);
+  // Drooping body — curves up and to the right
+  for (int i = 0; i < 18; i++) {
+    int y = hy - 3 - i;
+    int xLeft  = hx - 18 + i * 2;
+    int xRight = hx - 8 + i * 2;
+    _t->drawFastHLine(xLeft, y, xRight - xLeft, VISOR_LOVE);
+  }
+  // Pom pom at the tip
+  int px = hx + 18, py = hy - 22;
+  _t->fillCircle(px, py, 3, SPECULAR);
+  _t->drawPixel(px - 1, py - 1, 0xC638);
+}
+
+// Z particles drifting up — used in sleep state.
+static void drawZParticles(uint32_t t) {
+  _t->setTextColor(SPECULAR, BUDDY_BG);
+  _t->setTextSize(1);
+  int p1 = (int)(t * 2) % 30;
+  if (p1 < 26) {
+    _t->setCursor(HX + 12, HY - 16 - p1);
+    _t->print("z");
+  }
+  int p2 = (int)((t + 5) * 2) % 30;
+  if (p2 < 26) {
+    _t->setTextSize(2);
+    _t->setCursor(HX + 18, HY - 24 - p2);
+    _t->print("Z");
+    _t->setTextSize(1);
+  }
+}
+
+// Confetti rain — for celebrate.
+static void drawConfetti(uint32_t t) {
+  static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, EMBER_HOT };
+  for (int i = 0; i < 14; i++) {
+    int phase = ((int)t * 2 + i * 11) % 40;
+    int x = (i * 11 + (int)t * 3) % 135;
+    int y = phase * 4;
+    if (y < 0 || y > 132) continue;
+    uint16_t c = CONF_COL[i % 5];
+    if (i & 1) _t->fillRect(x, y, 2, 3, c);
+    else       _t->fillCircle(x, y, 1, c);
+  }
+}
+
+// Extra heart cloud — sparser but with bigger hearts. Heart state only.
+static void drawHeartCloud(uint32_t t) {
+  static const int8_t HPOS[][2] = {
+    {18, 50}, {28, 28}, {10, 92}, {110, 38}, {118, 72}, {102, 100}
+  };
+  for (int i = 0; i < 6; i++) {
+    int phase = ((int)t * 2 + i * 7) % 24;
+    int y = HPOS[i][1] - phase;
+    int x = HPOS[i][0] + ((i & 1) ? 1 : -1);
+    if (y < 0) continue;
+    drawHeart(x, y, HEART_RED);
+  }
+}
+
+// Optional chest LCD — replaces the bolt with a small green readout.
+// Opt-in via settings (e.g. settings.chestLcd = true). text is ≤4 chars
+// to fit in the 20×11 inset.
+static void drawChestLCD(const char* text) {
+  int lx = HX - 11, ly = HY + 30;
+  int lw = 22, lh = 11;
+  _t->fillRect(lx - 1, ly - 1, lw + 2, lh + 2, INK);
+  _t->fillRect(lx, ly, lw, lh, 0x02E0);
+  // 1px lit border
+  _t->drawRect(lx, ly, lw, lh, 0x0660);
+  _t->setTextSize(1);
+  _t->setTextColor(0x5FE0, 0x02E0);
+  int textLen = 0; while (text[textLen]) textLen++;
+  int textW = textLen * 6;
+  _t->setCursor(lx + (lw - textW) / 2, ly + 2);
+  _t->print(text);
+}
+
 // ── States ──────────────────────────────────────────────────────────
 
 static void doSleep(uint32_t t) {
@@ -931,9 +1139,10 @@ static void doSleep(uint32_t t) {
   drawNeck3D();
   drawHead3D();
   drawVisor3D(VISOR_OFF);
-  drawSunglasses3D();
   drawMouth3D(1);                   // closed flat
   drawAntenna3D(0);                 // LED off
+  drawNightcap();                   // NEW: drooping sleep cap
+  drawZParticles(t);                // NEW: Zzz drifting up
   drawMoodParticles(t, 2, 4);
 }
 
@@ -966,12 +1175,14 @@ static void doBusy(uint32_t t) {
   drawNeck3D();
   drawHead3D();
   drawVisor3D(VISOR_BUSY);
-  drawMouth3D(3);                     // grimace
+  drawMouth3D(3);                   // grimace
   drawAntenna3D(ledPulse ? VISOR_BUSY : 0);
-  // (no shades, no joint — tossed)
-  // 2D tumbling discarded items at upper corners
-  drawDiscardedGlasses(t);
-  drawDiscardedJoint(t);
+  // NEW: headphones on, sunglasses off, hands typing on laptop.
+  // Discarded items remain as cameo in upper corners but smaller —
+  // gr0m is fully focused now.
+  drawHeadphones();
+  drawLaptop(t);
+  drawHandsAtLaptop();
   drawMoodParticles(t, 4, 1);
 }
 
@@ -992,6 +1203,8 @@ static void doAttention(uint32_t t) {
   drawAntenna3D(pulse ? VISOR_ALERT : 0);
   drawSmokeFromMouth(t, 1, 0);
   drawMoodParticles(t, 5, 1);
+  // NEW: pixel speech bubble — blinks on every other tick.
+  if (pulse) drawSpeechBubble("!", VISOR_ALERT);
 }
 
 static void doCelebrate(uint32_t t) {
@@ -1011,6 +1224,8 @@ static void doCelebrate(uint32_t t) {
   drawJoint3D(t, true);
   drawAntenna3D(RAINBOW[t % 6]);
   drawSmokeFromMouth(t, 2, _yProjOff);
+  drawPartyHat();                     // NEW: pointy hat with stripes + pom
+  drawConfetti(t);                    // NEW: confetti rain across the screen
   drawMoodParticles(t, 6, 1);
 }
 
@@ -1047,6 +1262,7 @@ static void doHeart(uint32_t t) {
   drawJoint3D(t, true);
   drawAntenna3D(((t / 3) & 1) ? HEART_RED : 0);
   drawSmokeFromMouth(t, 2, 0);
+  drawHeartCloud(t);                  // NEW: extra hearts floating
   drawMoodParticles(t, 4, 2);
 }
 

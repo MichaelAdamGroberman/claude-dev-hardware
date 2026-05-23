@@ -781,48 +781,103 @@ static uint8_t wrapInto(const char* in, char out[][24], uint8_t maxRows, uint8_t
   return row;
 }
 
+// drawApproval — redesigned permission prompt.
+// Takes the bottom 132 px (out of 240) for a bigger, scannable layout:
+//   • red alarm bar with elapsed timer
+//   • HUGE tool name (size 3 = 24 px glyphs)
+//   • truncated command preview underneath
+//   • full-width ALLOW (green) / DENY (red) action zones at the bottom
+// The buddy keeps drawing in the upper region (attention mood: red visor,
+// LED blink) so the urgency is doubled by the chest-LED firmware path.
 static void drawApproval() {
   const Palette& p = characterPalette();
-  const int AREA = 78;
-  spr.fillRect(0, H - AREA, W, AREA, p.bg);
-  spr.drawFastHLine(0, H - AREA, W, p.textDim);
+  const int AREA = 132;
+  const int TOP = H - AREA;     // 240 - 132 = 108
+  const uint16_t ALARM   = 0xF800;   // red
+  const uint16_t ALLOW_BG = 0x0A20;  // dark green
+  const uint16_t ALLOW_FG = 0x07E0;  // bright green
+  const uint16_t DENY_BG  = 0x3000;  // dark red
+  const uint16_t DENY_FG  = 0xFA20;
 
-  spr.setTextSize(2);
-  spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(4, H - AREA + 4);
+  // Background (covers buddy clipping below TOP)
+  spr.fillRect(0, TOP, W, AREA, p.bg);
+
+  // ── ALARM BAR ───────────────────────────────────────────────────
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
-  if (waited >= 10) spr.setTextColor(HOT, p.bg);
-  spr.printf("approve? %lus", (unsigned long)waited);
+  spr.fillRect(0, TOP, W, 22, ALARM);
+  spr.setTextSize(2);
+  spr.setTextColor(0x0000, ALARM);
+  spr.setCursor(6, TOP + 4);
+  spr.print("APPROVE");
+  // elapsed time, right-aligned, turns yellow after 10s
+  char tb[8]; snprintf(tb, sizeof(tb), "%lus", (unsigned long)waited);
+  int tlen = strlen(tb);
+  spr.setTextColor(waited >= 10 ? 0xFFE0 : 0x0000, ALARM);
+  spr.setCursor(W - tlen * 12 - 6, TOP + 4);
+  spr.print(tb);
 
-  // Size 2 only if it fits one line (~10 chars at 12px on 135px screen)
+  // ── TOOL NAME (huge) ─────────────────────────────────────────────
+  spr.setTextSize(1);
+  spr.setTextColor(HOT, p.bg);
+  spr.setCursor(6, TOP + 28);
+  spr.print("TOOL");
+
   int toolLen = strlen(tama.promptTool);
+  // Try size 3 first (18px glyph, ~7 chars in 135 wide); fall back as needed
+  uint8_t toolSize = (toolLen <= 7) ? 3 : (toolLen <= 10) ? 2 : 1;
+  spr.setTextSize(toolSize);
   spr.setTextColor(p.text, p.bg);
-  spr.setTextSize(toolLen <= 10 ? 2 : 1);
-  spr.setCursor(4, H - AREA + (toolLen <= 10 ? 14 : 18));
+  spr.setCursor(6, TOP + 38);
   spr.print(tama.promptTool);
   spr.setTextSize(1);
 
-  // Hint wraps at ~21 chars to two lines under the tool name
+  // ── COMMAND PREVIEW ──────────────────────────────────────────────
+  int previewY = TOP + 38 + (toolSize == 3 ? 26 : toolSize == 2 ? 18 : 12);
   spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(6, previewY);
+  spr.print("RUN");
+  spr.setTextColor(p.text, p.bg);
   int hlen = strlen(tama.promptHint);
-  spr.setCursor(4, H - AREA + 34);
+  spr.setCursor(6, previewY + 10);
   spr.printf("%.21s", tama.promptHint);
   if (hlen > 21) {
-    spr.setCursor(4, H - AREA + 42);
+    spr.setCursor(6, previewY + 18);
     spr.printf("%.21s", tama.promptHint + 21);
   }
 
+  // ── ACTION FOOTER — ALLOW | DENY ────────────────────────────────
+  const int FH = 36;       // footer height
+  const int FY = H - FH;
+  spr.fillRect(0,       FY, W / 2,     FH, responseSent ? PANEL : ALLOW_BG);
+  spr.fillRect(W / 2,   FY, W - W/2,   FH, responseSent ? PANEL : DENY_BG);
+  spr.drawFastVLine(W / 2, FY, FH, 0x0000);
+  spr.drawFastHLine(0, FY, W, 0x0000);
+
   if (responseSent) {
-    spr.setTextColor(p.textDim, p.bg);
-    spr.setCursor(4, H - 12);
-    spr.print("sent...");
+    spr.setTextSize(2);
+    spr.setTextColor(p.textDim, PANEL);
+    spr.setCursor((W - 6 * 12) / 2, FY + 10);
+    spr.print("sent…");
+    spr.setTextSize(1);
   } else {
-    spr.setTextColor(GREEN, p.bg);
-    spr.setCursor(4, H - 12);
-    spr.print("A: approve");
-    spr.setTextColor(HOT, p.bg);
-    spr.setCursor(W - 48, H - 12);
-    spr.print("B: deny");
+    // ALLOW: ✓ + label
+    spr.setTextSize(3);
+    spr.setTextColor(ALLOW_FG, ALLOW_BG);
+    spr.setCursor(20, FY + 4);
+    spr.print("OK");
+    spr.setTextSize(1);
+    spr.setTextColor(ALLOW_FG, ALLOW_BG);
+    spr.setCursor(16, FY + 28);
+    spr.print("A allow");
+    // DENY: ✗ + label
+    spr.setTextSize(3);
+    spr.setTextColor(DENY_FG, DENY_BG);
+    spr.setCursor(W / 2 + 20, FY + 4);
+    spr.print("NO");
+    spr.setTextSize(1);
+    spr.setTextColor(DENY_FG, DENY_BG);
+    spr.setCursor(W / 2 + 18, FY + 28);
+    spr.print("B deny");
   }
 }
 
@@ -839,53 +894,110 @@ static void tinyHeart(int x, int y, bool filled, uint16_t col) {
   }
 }
 
+// drawPetStats — redesigned card-style stats page.
+// Big LV pill + Fed/Energy bars at top, 2×2 grid below with hero numbers
+// in mood-colored typography. Header on top is drawn by drawPet() —
+// content starts at y=88 to leave 16 px for the title row.
 static void drawPetStats(const Palette& p) {
   const int TOP = 70;
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
-  spr.setTextSize(2);
-  int y = TOP + 16;
 
-  spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(6, y - 2); spr.print("fed");
-  uint8_t fed = statsFedProgress();
-  for (int i = 0; i < 10; i++) {
-    int px = 38 + i * 9;
-    if (i < fed) spr.fillCircle(px, y + 1, 2, p.body);
-    else spr.drawCircle(px, y + 1, 2, p.textDim);
-  }
-
-  y += 20;
-  spr.setCursor(6, y - 2); spr.print("energy");
-  uint8_t en = statsEnergyTier();
-  uint16_t enCol = (en >= 4) ? 0x07FF : (en >= 2) ? 0xFFE0 : HOT;
-  for (int i = 0; i < 5; i++) {
-    int px = 54 + i * 13;
-    if (i < en) spr.fillRect(px, y - 2, 9, 6, enCol);
-    else spr.drawRect(px, y - 2, 9, 6, p.textDim);
-  }
-
-  y += 24;
-  spr.fillRoundRect(6, y - 2, 42, 14, 3, p.body);
+  // ── LV CHIP ─────────────────────────────────────────────────────
+  int y = 88;
+  spr.fillRoundRect(6, y, 46, 18, 3, p.body);
+  spr.setTextSize(1);
   spr.setTextColor(p.bg, p.body);
-  spr.setCursor(11, y + 1); spr.printf("Lv %u", stats().level);
+  spr.setCursor(11, y + 5);
+  spr.print("LV");
+  spr.setTextSize(2);
+  spr.setCursor(26, y + 2);
+  spr.printf("%u", stats().level);
+  spr.setTextSize(1);
 
-  y += 20;
+  // ── FED METER ───────────────────────────────────────────────────
+  y = 112;
   spr.setTextColor(p.textDim, p.bg);
   spr.setCursor(6, y);
-  spr.printf("approved %u", stats().approvals);
-  spr.setCursor(6, y + 10);
-  spr.printf("denied   %u", stats().denials);
-  uint32_t nap = stats().napSeconds;
-  spr.setCursor(6, y + 20);
-  spr.printf("napped   %luh%02lum", nap/3600, (nap/60)%60);
-  auto tokFmt = [&](const char* label, uint32_t v, int yPx) {
-    spr.setCursor(6, yPx);
-    if (v >= 1000000)   spr.printf("%s%lu.%luM", label, v/1000000, (v/100000)%10);
-    else if (v >= 1000) spr.printf("%s%lu.%luK", label, v/1000, (v/100)%10);
-    else                spr.printf("%s%lu", label, v);
+  spr.print("FED");
+  uint8_t fed = statsFedProgress();
+  spr.setTextColor(p.body, p.bg);
+  spr.setCursor(W - 22, y);
+  spr.printf("%u/10", fed);
+  for (int i = 0; i < 10; i++) {
+    int px = 6 + i * 12;
+    if (i < fed) spr.fillCircle(px + 4, y + 16, 4, p.body);
+    else         spr.drawCircle(px + 4, y + 16, 4, p.textDim);
+  }
+
+  // ── ENERGY METER ────────────────────────────────────────────────
+  y = 140;
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(6, y);
+  spr.print("ENERGY");
+  uint8_t en = statsEnergyTier();
+  uint16_t enCol = (en >= 4) ? 0x07E0 : (en >= 2) ? 0xFFE0 : HOT;
+  spr.setTextColor(enCol, p.bg);
+  spr.setCursor(W - 16, y);
+  spr.printf("%u/5", en);
+  for (int i = 0; i < 5; i++) {
+    int px = 6 + i * 25;
+    if (i < en) spr.fillRect(px, y + 12, 22, 10, enCol);
+    else        spr.drawRect(px, y + 12, 22, 10, p.textDim);
+  }
+
+  // ── DIVIDER ─────────────────────────────────────────────────────
+  y = 170;
+  spr.drawFastHLine(6, y, W - 12, p.textDim);
+
+  // ── 2×2 STAT GRID — APPROVED / DENIED / TOKENS / NAPPED ─────────
+  y = 178;
+  const int COL2 = 72;
+  auto cell = [&](int cx, int cy, const char* label, uint16_t labelCol, uint16_t valCol, const char* fmt, uint32_t v) {
+    spr.setTextSize(1);
+    spr.setTextColor(labelCol, p.bg);
+    spr.setCursor(cx, cy);
+    spr.print(label);
+    spr.setTextSize(2);
+    spr.setTextColor(valCol, p.bg);
+    spr.setCursor(cx, cy + 10);
+    spr.printf(fmt, (unsigned long)v);
+    spr.setTextSize(1);
   };
-  tokFmt("tokens   ", stats().tokens, y + 30);
-  tokFmt("today    ", tama.tokensToday, y + 40);
+
+  // Token short formatter — returns char* in caller-owned buffer
+  auto tokStr = [](char* buf, size_t bsz, uint32_t v) -> const char* {
+    if (v >= 1000000)   snprintf(buf, bsz, "%lu.%luM", v / 1000000, (v / 100000) % 10);
+    else if (v >= 1000) snprintf(buf, bsz, "%lu.%luK", v / 1000, (v / 100) % 10);
+    else                snprintf(buf, bsz, "%lu", (unsigned long)v);
+    return buf;
+  };
+
+  // Row 1
+  cell(6,    y, "APPROVED", p.textDim, 0x07E0, "%lu", stats().approvals);
+  cell(COL2, y, "DENIED",   p.textDim, HOT,    "%lu", stats().denials);
+
+  // Row 2 — TOKENS, NAPPED
+  y += 32;
+  char tbuf[12];
+  spr.setTextSize(1);
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(6, y);
+  spr.print("TOKENS");
+  spr.setTextColor(p.text, p.bg);
+  spr.setTextSize(2);
+  spr.setCursor(6, y + 10);
+  spr.print(tokStr(tbuf, sizeof(tbuf), stats().tokens));
+  spr.setTextSize(1);
+
+  uint32_t nap = stats().napSeconds;
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(COL2, y);
+  spr.print("NAPPED");
+  spr.setTextSize(2);
+  spr.setTextColor(0x05FF, p.bg);
+  spr.setCursor(COL2, y + 10);
+  spr.printf("%luh%02lu", nap / 3600, (nap / 60) % 60);
+  spr.setTextSize(1);
 }
 
 static void drawPetHowTo(const Palette& p) {
