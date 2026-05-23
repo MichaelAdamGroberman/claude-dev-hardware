@@ -1,5 +1,6 @@
 #include "../buddy.h"
 #include "../buddy_common.h"
+#include "../stats.h"     // stats().tokens — for the chest-LCD token counter
 #include <M5StickCPlus.h>
 
 extern TFT_eSprite spr;
@@ -1179,10 +1180,11 @@ static void doIdle(uint32_t t) {
   // counting".
   bool lcdFrame = ((t / 5) % 4) == 0;
   if (lcdFrame) {
-    // chest LCD swap — tokens with K/M shortening so it always fits 4 chars
-    extern TamaState tama;
+    // chest LCD swap — tokens with K/M shortening so it always fits 4 chars.
+    // Source is stats().tokens (NVS-backed cumulative), not tama.tokens —
+    // TamaState carries the live BLE feed, not the persistent counter.
     char buf[8];
-    uint32_t v = tama.tokens;
+    uint32_t v = stats().tokens;
     if (v >= 1000000)   snprintf(buf, sizeof(buf), "%luM", v / 1000000);
     else if (v >= 1000) snprintf(buf, sizeof(buf), "%luK", v / 1000);
     else                snprintf(buf, sizeof(buf), "%lu", (unsigned long)v);
