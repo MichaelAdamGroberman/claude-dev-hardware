@@ -18,6 +18,10 @@ void buddySetSpecies(const char* name);
 void buddySetSpeciesIdx(uint8_t idx);
 void buddyNextSpecies();
 void buddySetPeek(bool peek);
+// Current render scale (1 = peek/secondary screens, 2 = home).
+// Vector species like gr0m read this to shrink themselves on the PET
+// and INFO screens so they don't overlap the panel content.
+uint8_t buddyScale();
 uint8_t buddySpeciesIdx();
 uint8_t buddySpeciesCount();
 const char* buddySpeciesName();
