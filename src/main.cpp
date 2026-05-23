@@ -704,40 +704,45 @@ void drawInfo() {
     spr.setTextSize(1);
     spr.setCursor(4, y); spr.print(b); y += 8;
   };
-  // lg() — size 2 (paragraph pages: ABOUT / BUTTONS / CREDITS get
-  // larger body text. Strings hand-rewrapped to fit ~10 chars/line.)
+  // lg() — TFT_eSPI built-in Font 2 (8×16 proportional, ~16 chars/line).
+  // Bigger than the default size-1 font but slimmer than setTextSize(2)
+  // so more text fits per line while still being legible. Resets to
+  // Font 1 on exit so callers that assume default+setTextSize still work.
   auto lg = [&](const char* fmt, ...) {
     char b[32]; va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
-    spr.setTextSize(2);
-    spr.setCursor(4, y); spr.print(b); y += 14;
+    spr.setTextFont(2);
+    spr.setTextSize(1);
+    spr.setCursor(4, y); spr.print(b); y += 16;
+    spr.setTextFont(1);
   };
 
   if (infoPage == 0) {
     _infoHeader(p, y, "ABOUT", infoPage);
     spr.setTextColor(p.textDim, p.bg);
-    lg("I watch");
-    lg("your Claude");
-    lg("desktop.");
+    lg("I watch your");
+    lg("Claude desktop.");
     y += 4;
-    lg("I sleep,");
-    lg("wake, get");
-    lg("impatient");
-    lg("on prompts.");
+    lg("I sleep when");
+    lg("nothing happens,");
+    lg("wake when you");
+    lg("start working,");
+    lg("get impatient on");
+    lg("pending prompts.");
     y += 4;
     spr.setTextColor(p.text, p.bg);
-    lg("Press A");
-    lg("to approve.");
+    lg("Press A on a");
+    lg("prompt to approve.");
 
   } else if (infoPage == 1) {
     _infoHeader(p, y, "BUTTONS", infoPage);
     spr.setTextColor(p.text, p.bg);    lg("A  front");
-    spr.setTextColor(p.textDim, p.bg); lg("  next/OK");
-    spr.setTextColor(p.text, p.bg);    lg("B  right");
-    spr.setTextColor(p.textDim, p.bg); lg("  page/deny");
+    spr.setTextColor(p.textDim, p.bg); lg("   next / approve");
+    spr.setTextColor(p.text, p.bg);    lg("B  right side");
+    spr.setTextColor(p.textDim, p.bg); lg("   page / deny");
     spr.setTextColor(p.text, p.bg);    lg("hold A");
-    spr.setTextColor(p.textDim, p.bg); lg("  open menu");
-    spr.setTextColor(p.text, p.bg);    lg("Power");
-    spr.setTextColor(p.textDim, p.bg); lg("  6s = off");
+    spr.setTextColor(p.textDim, p.bg); lg("   open menu");
+    spr.setTextColor(p.text, p.bg);    lg("Power  left");
+    spr.setTextColor(p.textDim, p.bg); lg("   6s = power off");
 
   } else if (infoPage == 2) {
     _infoHeader(p, y, "CLAUDE", infoPage);
@@ -833,17 +838,21 @@ void drawInfo() {
     _infoHeader(p, y, "CREDITS", infoPage);
     spr.setTextColor(p.textDim, p.bg);
     lg("made by");
-    y += 4;
     spr.setTextColor(p.text, p.bg);
-    lg("Michael");
-    lg("Groberman");
+    lg("Michael Groberman");
+    y += 6;
+    spr.setTextColor(p.textDim, p.bg);
+    lg("upstream source");
+    spr.setTextColor(p.text, p.bg);
+    lg("anthropics /");
+    lg("claude-desktop-");
+    lg("buddy");
     y += 6;
     spr.setTextColor(p.textDim, p.bg);
     lg("hardware");
-    y += 4;
     spr.setTextColor(p.text, p.bg);
-    lg("M5StickC+");
-    lg("ESP32");
+    lg("M5StickC Plus");
+    lg("ESP32 + AXP192");
   }
 }
 
