@@ -1038,8 +1038,11 @@ static void drawPetStats(const Palette& p) {
   spr.print("FED");
   uint8_t fed = statsFedProgress();
   spr.setTextColor(p.body, p.bg);
-  spr.setCursor(W - 22, y);
-  spr.printf("%u/10", fed);
+  // Dynamically right-align so "10/10" (5 chars × 6 px = 30) doesn't run
+  // off the 135-px screen — the patch used a fixed W-22 that overflowed.
+  char fb[8]; snprintf(fb, sizeof(fb), "%u/10", fed);
+  spr.setCursor(W - 4 - (int)strlen(fb) * 6, y);
+  spr.print(fb);
   for (int i = 0; i < 10; i++) {
     int px = 6 + i * 12;
     if (i < fed) spr.fillCircle(px + 4, y + 16, 4, p.body);
@@ -1062,17 +1065,15 @@ static void drawPetStats(const Palette& p) {
   spr.setTextColor(p.textDim, p.bg);
   spr.setCursor(6, y);
   spr.print("BATTERY");
-  // Mode badge on the right of the label row
-  if (charging) {
-    spr.setTextColor(0xFFE0, p.bg);
-    spr.setCursor(W - 24, y);
-    spr.print("CHG");
-  } else if (usb) {
-    spr.setTextColor(0x05FF, p.bg);
-    spr.setCursor(W - 24, y);
-    spr.print("USB");
+  // Mode badge on the right of the label row — right-aligned with 4 px margin.
+  const char* badge = charging ? "CHG" : (usb ? "USB" : nullptr);
+  if (badge) {
+    spr.setTextColor(charging ? 0xFFE0 : 0x05FF, p.bg);
+    spr.setCursor(W - 4 - (int)strlen(badge) * 6, y);
+    spr.print(badge);
   }
-  // Percentage in batt color, slightly right of label
+  // Percentage in batt color — fits between BATTERY label (ends ~x=48) and
+  // the badge (starts ~x=113 at most). "100%" is 4 chars * 6 = 24 px wide.
   spr.setTextColor(batCol, p.bg);
   spr.setCursor(56, y);
   spr.printf("%d%%", pct);

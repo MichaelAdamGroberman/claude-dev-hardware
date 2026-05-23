@@ -83,7 +83,11 @@ class BuddyLink:
         # Line accumulator — BLE notifications can fragment at the MTU.
         self._rx_buf = bytearray()
         # Cached snapshot fields so we can re-send on demand.
-        self._owner = "Claude Code"
+        # Owner name shows up as "<owner>'s gr0m" on the boot splash + PET
+        # header (size 2 = 12 px/char on a 135 px screen). Keep it ≤ 6
+        # chars so "<owner>'s gr0m" stays inside the viewport. Default
+        # "CLI" makes the badge match the src tag on the alarm bar.
+        self._owner = os.environ.get("BUDDY_OWNER", "CLI")
 
     # ── BLE plumbing ────────────────────────────────────────────────
 
