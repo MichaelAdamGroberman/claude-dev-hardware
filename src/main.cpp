@@ -824,11 +824,11 @@ void drawInfo() {
       spr.setTextColor(p.text, p.bg);
       ln("TO PAIR");
       spr.setTextColor(p.textDim, p.bg);
-      ln(" Open Claude desktop");
+      ln(" Open Claude app");
       ln(" > Developer");
       ln(" > Hardware Buddy");
       y += 4;
-      ln(" auto-connects via BLE");
+      ln(" auto-reconnects");
     }
 
   } else {
@@ -836,20 +836,19 @@ void drawInfo() {
     spr.setTextColor(p.textDim, p.bg);
     lg("made by");
     spr.setTextColor(p.text, p.bg);
-    lg("Michael Groberman");
+    lg("Michael");
+    lg("Groberman");
     y += 6;
     spr.setTextColor(p.textDim, p.bg);
-    lg("upstream source");
+    lg("upstream");
     spr.setTextColor(p.text, p.bg);
-    lg("anthropics /");
-    lg("claude-desktop-");
-    lg("buddy");
+    lg("anthropic /");
+    lg("claude-buddy");
     y += 6;
     spr.setTextColor(p.textDim, p.bg);
     lg("hardware");
     spr.setTextColor(p.text, p.bg);
-    lg("M5StickC Plus");
-    lg("ESP32 + AXP192");
+    lg("M5StickC+");
   }
 }
 
@@ -1145,31 +1144,29 @@ static void drawPetStats(const Palette& p) {
 static void drawPetHowTo(const Palette& p) {
   const int TOP = 70;
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
-  spr.setTextSize(2);
-  int y = TOP + 2;
+  int y = TOP + 14;            // room for the PET header drawn by drawPet()
+  // Same Font 2 style the Info paragraph pages use — 8×16 px proportional,
+  // ~16 chars/line on a 135 px screen, pitch 14 leaves a touch of air.
   auto ln = [&](uint16_t c, const char* s) {
-    spr.setTextColor(c, p.bg); spr.setCursor(6, y); spr.print(s); y += 9;
+    spr.setTextColor(c, p.bg);
+    spr.setTextFont(2); spr.setTextSize(1);
+    spr.setCursor(6, y); spr.print(s); y += 14;
+    spr.setTextFont(1);        // restore default
   };
   auto gap = [&]() { y += 4; };
 
-  y += 12;  // room for the PET header drawn by drawPet()
-
   ln(p.body,    "MOOD");
-  ln(p.textDim, " approve fast = up");
-  ln(p.textDim, " deny lots = down"); gap();
+  ln(p.textDim, " quick approve");
+  ln(p.textDim, " keeps it up");      gap();
 
   ln(p.body,    "FED");
   ln(p.textDim, " 50K tokens =");
-  ln(p.textDim, " level up + confetti"); gap();
+  ln(p.textDim, " level up");         gap();
 
-  ln(p.body,    "ENERGY");
-  ln(p.textDim, " face-down to nap");
-  ln(p.textDim, " refills to full"); gap();
+  ln(p.body,    "BATTERY");
+  ln(p.textDim, " usb charges");      gap();
 
-  ln(p.textDim, "idle 30s = off");
-  ln(p.textDim, "any button = wake"); gap();
-
-  ln(p.textDim, "A: screens  B: page");
+  ln(p.textDim, "A: page");
   ln(p.textDim, "hold A: menu");
 }
 
