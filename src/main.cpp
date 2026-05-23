@@ -1034,21 +1034,45 @@ static void drawPetStats(const Palette& p) {
     else         spr.drawCircle(px + 4, y + 16, 4, p.textDim);
   }
 
-  // ── ENERGY METER ────────────────────────────────────────────────
+  // ── BATTERY ─────────────────────────────────────────────────────
+  // Real hardware battery (AXP192), replacing the prior pet "energy" tier.
   y = 140;
+  int vBat_mV = (int)(M5.Axp.GetBatVoltage() * 1000);
+  int iBat_mA = (int)M5.Axp.GetBatCurrent();
+  int vBus_mV = (int)(M5.Axp.GetVBusVoltage() * 1000);
+  int pct = (vBat_mV - 3200) / 10;    // (v-3.2)/(4.2-3.2)*100 with mV
+  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+  bool usb      = vBus_mV > 4000;
+  bool charging = usb && iBat_mA > 1;
+  uint16_t batCol = (pct >= 50) ? 0x07E0 : (pct >= 20) ? 0xFFE0 : HOT;
+
+  spr.setTextSize(1);
   spr.setTextColor(p.textDim, p.bg);
   spr.setCursor(6, y);
-  spr.print("ENERGY");
-  uint8_t en = statsEnergyTier();
-  uint16_t enCol = (en >= 4) ? 0x07E0 : (en >= 2) ? 0xFFE0 : HOT;
-  spr.setTextColor(enCol, p.bg);
-  spr.setCursor(W - 16, y);
-  spr.printf("%u/5", en);
-  for (int i = 0; i < 5; i++) {
-    int px = 6 + i * 25;
-    if (i < en) spr.fillRect(px, y + 12, 22, 10, enCol);
-    else        spr.drawRect(px, y + 12, 22, 10, p.textDim);
+  spr.print("BATTERY");
+  // Mode badge on the right of the label row
+  if (charging) {
+    spr.setTextColor(0xFFE0, p.bg);
+    spr.setCursor(W - 24, y);
+    spr.print("CHG");
+  } else if (usb) {
+    spr.setTextColor(0x05FF, p.bg);
+    spr.setCursor(W - 24, y);
+    spr.print("USB");
   }
+  // Percentage in batt color, slightly right of label
+  spr.setTextColor(batCol, p.bg);
+  spr.setCursor(56, y);
+  spr.printf("%d%%", pct);
+
+  // Battery shell with terminal nub + fill
+  int by = y + 12;
+  int bw = W - 18;     // leave room for the terminal on the right
+  int bh = 12;
+  spr.drawRect(6, by, bw, bh, p.textDim);
+  spr.fillRect(6 + bw, by + 3, 4, bh - 6, p.textDim);  // terminal nub
+  int fill = (pct * (bw - 4)) / 100;
+  if (fill > 0) spr.fillRect(8, by + 2, fill, bh - 4, batCol);
 
   // ── DIVIDER ─────────────────────────────────────────────────────
   y = 170;
@@ -1143,7 +1167,7 @@ void drawPet() {
   if (petPage == 0) drawPetStats(p);
   else drawPetHowTo(p);
 
-  // Header on top of whichever page drew — title left, counter right
+  // Header on top of whichever page drew — title only (no page counter).
   spr.setTextSize(2);
   spr.setTextColor(p.text, p.bg);
   spr.setCursor(4, y + 2);
@@ -1152,9 +1176,6 @@ void drawPet() {
   } else {
     spr.print(petName());
   }
-  spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(W - 28, y + 2);
-  spr.printf("%u/%u", petPage + 1, PET_PAGES);
 }
 
 // WiFi status block (top-right corner). Shows whenever the WiFi

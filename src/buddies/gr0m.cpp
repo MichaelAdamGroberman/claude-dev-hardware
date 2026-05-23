@@ -185,6 +185,7 @@ static void drawLeaf(int x, int y, uint16_t c) {
 // Soft drop shadow beneath the robot — offset by tilt so it tracks the
 // "light source" direction, giving a fake-3D "lifted off screen" feel.
 static void drawShadow(int yOff) {
+  if (buddyScale() == 1) return;   // 2D helpers use home HX/HY — skip in peek
   int sx = HX + _tiltX * 2;
   int sy = HY + 60 + yOff;
   // 3-ring soft shadow, darkest at center
@@ -752,6 +753,7 @@ static void drawChest(uint16_t boltColor, int yOff) {
 // and it droops down-right. The shaft is drawn as a thin diagonal line
 // instead of a horizontal rect, so the angle is visible.
 static void drawJointInMouth(uint32_t t, bool lit, int yOff) {
+  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int jY = HY + 14 + yOff + fy;
@@ -780,6 +782,7 @@ static void drawJointInMouth(uint32_t t, bool lit, int yOff) {
 // Also follows the joint tip's drop angle so the smoke trail starts
 // at the actual ember position.
 static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
+  if (buddyScale() == 1) return;
   if (intensity <= 0) return;
   int fx = faceOffX();
   int fy = faceOffY();
@@ -810,6 +813,7 @@ static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
 
 // Glasses tumbling in upper-left, cycles through 4 orientation poses
 static void drawDiscardedGlasses(uint32_t t) {
+  if (buddyScale() == 1) return;
   // Static base position with small arc bob
   static const int8_t BOB_X[4] = { 0, 2, 4, 2 };
   static const int8_t BOB_Y[4] = { 0, -2, 0, 2 };
@@ -856,6 +860,7 @@ static void drawDiscardedGlasses(uint32_t t) {
 
 // Joint tumbling in upper-right with trailing smoke
 static void drawDiscardedJoint(uint32_t t) {
+  if (buddyScale() == 1) return;
   static const int8_t BOB_X[4] = { 0, -2, -4, -2 };
   static const int8_t BOB_Y[4] = { 0, -3, 0, 3 };
   uint8_t pose = (t / 3) % 4;
@@ -906,6 +911,7 @@ static void drawDiscardedJoint(uint32_t t) {
 // Hearts → leaves. Hearts rise on the left, morphing to green leaves
 // at the half-life of their flight.
 static void drawMoodParticles(uint32_t t, int n, int speed) {
+  if (buddyScale() == 1) return;
   const int LIFECYCLE = 28;
   const int MORPH = LIFECYCLE / 2;
   int baseX = -32;
@@ -932,6 +938,7 @@ static void drawMoodParticles(uint32_t t, int n, int speed) {
 // Drawn AFTER the head so it overlays. Tracks face-plane offset so it
 // rides with head rotation.
 static void drawHeadphones() {
+  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int cx = HX + fx;
@@ -979,6 +986,7 @@ static void drawHandsAtLaptop() {
 // Tiny laptop sat in front of gr0m, glowing green screen with fake code.
 // Drawn between chest and bottom edge of screen so it reads as "on lap".
 static void drawLaptop(uint32_t t) {
+  if (buddyScale() == 1) return;
   int cx = HX;
   int kx = cx - 20, ky = HY + 36;  // keyboard base
   int kw = 40, kh = 3;
@@ -1010,6 +1018,7 @@ static void drawLaptop(uint32_t t) {
 // outline and a tail. Text rendered in `textColor`. Position auto-clamps
 // to keep the bubble inside the 135px-wide screen, even with long text.
 static void drawSpeechBubble(const char* text, uint16_t textColor) {
+  if (buddyScale() == 1) return;
   int len = 0; while (text[len]) len++;
   int w = len * 6 + 6;
   // Place to the upper-right of the head, but clamp so right edge ≤ 134.
@@ -1034,6 +1043,7 @@ static void drawSpeechBubble(const char* text, uint16_t textColor) {
 
 // Party hat — pointy triangle on top of head with stripes and a pom.
 static void drawPartyHat() {
+  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int hx = HX + fx;
@@ -1050,6 +1060,7 @@ static void drawPartyHat() {
 
 // Nightcap — drooping cap that hangs to the right, white trim band, pom.
 static void drawNightcap() {
+  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int hx = HX + fx;
@@ -1072,6 +1083,7 @@ static void drawNightcap() {
 
 // Z particles drifting up — used in sleep state.
 static void drawZParticles(uint32_t t) {
+  if (buddyScale() == 1) return;
   _t->setTextColor(SPECULAR, BUDDY_BG);
   _t->setTextSize(1);
   int p1 = (int)(t * 2) % 30;
@@ -1090,6 +1102,7 @@ static void drawZParticles(uint32_t t) {
 
 // Confetti rain — for celebrate.
 static void drawConfetti(uint32_t t) {
+  if (buddyScale() == 1) return;
   static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, EMBER_HOT };
   for (int i = 0; i < 14; i++) {
     int phase = ((int)t * 2 + i * 11) % 40;
@@ -1104,6 +1117,7 @@ static void drawConfetti(uint32_t t) {
 
 // Extra heart cloud — sparser but with bigger hearts. Heart state only.
 static void drawHeartCloud(uint32_t t) {
+  if (buddyScale() == 1) return;
   static const int8_t HPOS[][2] = {
     {18, 50}, {28, 28}, {10, 92}, {110, 38}, {118, 72}, {102, 100}
   };
