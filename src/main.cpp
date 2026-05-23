@@ -1181,14 +1181,20 @@ void drawPet() {
   else drawPetHowTo(p);
 
   // Header on top of whichever page drew — title only (no page counter).
-  spr.setTextSize(2);
+  // Dynamic size: size 2 (12 px/char) fits ~10 chars at x=4 on the 135 px
+  // screen. Longer owner names (e.g. "Claude Code's gr0m" = 17 chars)
+  // would wrap to a second line at size 2, so fall back to size 1
+  // (6 px/char, ~21 chars fit) before that happens.
+  char title[40];
+  if (ownerName()[0]) {
+    snprintf(title, sizeof(title), "%s's %s", ownerName(), petName());
+  } else {
+    snprintf(title, sizeof(title), "%s", petName());
+  }
+  spr.setTextSize(strlen(title) <= 10 ? 2 : 1);
   spr.setTextColor(p.text, p.bg);
   spr.setCursor(4, y + 2);
-  if (ownerName()[0]) {
-    spr.printf("%s's %s", ownerName(), petName());
-  } else {
-    spr.print(petName());
-  }
+  spr.print(title);
 }
 
 // WiFi status block (top-right corner). Shows whenever the WiFi
