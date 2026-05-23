@@ -787,7 +787,7 @@ static void drawApproval() {
   spr.fillRect(0, H - AREA, W, AREA, p.bg);
   spr.drawFastHLine(0, H - AREA, W, p.textDim);
 
-  spr.setTextSize(1);
+  spr.setTextSize(2);
   spr.setTextColor(p.textDim, p.bg);
   spr.setCursor(4, H - AREA + 4);
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
@@ -842,7 +842,7 @@ static void tinyHeart(int x, int y, bool filled, uint16_t col) {
 static void drawPetStats(const Palette& p) {
   const int TOP = 70;
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
-  spr.setTextSize(1);
+  spr.setTextSize(2);
   int y = TOP + 16;
 
   spr.setTextColor(p.textDim, p.bg);
@@ -891,7 +891,7 @@ static void drawPetStats(const Palette& p) {
 static void drawPetHowTo(const Palette& p) {
   const int TOP = 70;
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
-  spr.setTextSize(1);
+  spr.setTextSize(2);
   int y = TOP + 2;
   auto ln = [&](uint16_t c, const char* s) {
     spr.setTextColor(c, p.bg); spr.setCursor(6, y); spr.print(s); y += 9;
@@ -927,7 +927,7 @@ void drawPet() {
   else drawPetHowTo(p);
 
   // Header on top of whichever page drew — title left, counter right
-  spr.setTextSize(1);
+  spr.setTextSize(2);
   spr.setTextColor(p.text, p.bg);
   spr.setCursor(4, y + 2);
   if (ownerName()[0]) {
@@ -1222,7 +1222,7 @@ void setup() {
     } else {
       // First boot, no owner pushed yet — say hi.
       spr.setTextColor(p.body, p.bg);   spr.drawString("Hello!", W/2, H/2 - 12);
-      spr.setTextSize(1);
+      spr.setTextSize(2);
       spr.setTextColor(p.textDim, p.bg);
       spr.drawString("gr0m appears", W/2, H/2 + 12);
     }
@@ -1447,7 +1447,7 @@ void loop() {
     const Palette& p = characterPalette();
     spr.fillSprite(p.bg);
     spr.setTextColor(p.textDim, p.bg);
-    spr.setTextSize(1);
+    spr.setTextSize(2);
     if (xferActive()) {
       uint32_t done = xferProgress(), total = xferTotal();
       spr.setCursor(8, 90);
