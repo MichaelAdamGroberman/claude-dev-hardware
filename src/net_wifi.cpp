@@ -1,5 +1,6 @@
 #include "net_wifi.h"
 #include "net_wg.h"
+#include "ble_bridge.h"
 #include "stats.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -88,15 +89,27 @@ static void startPortal() {
   _state = NW_STARTING;
   Serial.printf("[wifi] startPortal() heap=%u\n", (unsigned)ESP.getFreeHeap());
 
-  // Retry softAP up to 3× — BLE coexistence sometimes makes the first
-  // attempt fail; the radio scheduler usually settles within a second.
+  // BLE and WiFi share the single 2.4 GHz radio, and the BLE stack also
+  // holds ~30-40 KB of heap. With BLE advertising active, softAP often
+  // fails to allocate / get radio time (the "BLE coex?" failure). Pause
+  // BLE advertising while the config portal is up — it's a one-time
+  // setup step. BLE resumes on the next boot into STA mode, where
+  // STA + BLE coexist fine.
+  bleAdvertisingStop();
+  delay(200);
+  Serial.printf("[wifi] BLE adv paused for portal, heap=%u\n",
+                (unsigned)ESP.getFreeHeap());
+
+  // Retry softAP up to 5× — the radio scheduler usually settles within
+  // a second or two of pausing BLE.
   bool ok = false;
-  for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+  for (int attempt = 0; attempt < 5 && !ok; attempt++) {
     WiFi.mode(WIFI_AP);
-    delay(150);
+    delay(200);
     ok = WiFi.softAP("gr0m-setup", "gr0mgr0m");
-    Serial.printf("[wifi] softAP attempt %d: %s\n", attempt + 1, ok ? "OK" : "FAIL");
-    if (!ok) delay(400);
+    Serial.printf("[wifi] softAP attempt %d: %s heap=%u\n", attempt + 1,
+                  ok ? "OK" : "FAIL", (unsigned)ESP.getFreeHeap());
+    if (!ok) delay(500);
   }
   if (!ok) {
     snprintf(_lastErr, sizeof(_lastErr), "softAP failed (BLE coex?)");
