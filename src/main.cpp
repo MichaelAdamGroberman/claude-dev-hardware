@@ -1556,12 +1556,14 @@ void loop() {
   // Pump the WiFi config portal (no-op when not in AP mode)
   netWifiTick();
 
-  // WireGuard tunnel: bring it up once, the first time WiFi reaches
-  // ONLINE, then pump its status poll each loop. netWgInit() no-ops
-  // if there's no wg_* config in NVS.
+  // WireGuard tunnel: bring it up once, the first time WiFi is ONLINE
+  // AND the system clock is NTP-valid (WG handshake needs real time).
+  // Then pump its status poll each loop. netWgInit() no-ops if there's
+  // no wg_* config in NVS.
   static bool _wgStarted = false;
-  if (!_wgStarted && netWifiOnline()) {
+  if (!_wgStarted && netWifiOnline() && time(nullptr) > 1700000000) {
     _wgStarted = true;
+    Serial.printf("[wg] starting tunnel, epoch=%ld\n", (long)time(nullptr));
     netWgInit();
   }
   if (_wgStarted) netWgTick();

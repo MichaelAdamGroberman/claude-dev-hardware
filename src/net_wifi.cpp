@@ -171,6 +171,13 @@ void netWifiInit() {
         _state = NW_ONLINE;
         _staConnecting = false;
         _lastErr[0] = 0;
+        // Kick off NTP so the ESP32 SYSTEM clock (time()) is valid. The
+        // WireGuard handshake stamps a TAI64N timestamp read from the
+        // system clock — without this it sits at 1970 and the tunnel
+        // never comes up. UTC (offsets 0) is fine; WG doesn't care about
+        // local time. netWgInit() is gated on time() being valid.
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        Serial.println("[wifi] NTP sync started (pool.ntp.org)");
         break;
       default: break;
     }
