@@ -267,58 +267,107 @@ static void drawMenuHints(const Palette& p, int mx, int mw, int hy,
   spr.fillTriangle(x, hy, x, hy + 6, x + 5, hy + 3, p.textDim);
 }
 
+// v2 design: full-width card, orange header pill, 4-px orange left bar
+// marks the selected row, dim divider above the footer hint strip.
+// Settings stays at size 1 because "brightness"/"transcript" are 10
+// chars wide and at size 2 (12 px/char) the label overflows the value
+// column. Menu and Reset move to size 2 — those lists are shorter.
+
 static void drawSettings() {
   const Palette& p = characterPalette();
-  int mw = 118, mh = 16 + SETTINGS_N * 14 + MENU_HINT_H;
-  int mx = (W - mw) / 2, my = (H - mh) / 2;
+  const int mw = W - 8, mx = 4;
+  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 14;
+  const int mh = HEADER_H + SETTINGS_N * ROW_H + FOOTER_H;
+  const int my = (H - mh) / 2;
+
+  // Card chrome
   spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
+
+  // Header pill
+  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
   spr.setTextSize(1);
+  spr.setTextColor(p.bg, p.body);
+  spr.setCursor(mx + 6, my + 6);
+  spr.print("SETTINGS");
+
   Settings& s = settings();
   bool vals[] = { s.sound, s.bt, s.wifi, s.led, s.mic, s.hud };
+  int rowsTop = my + HEADER_H + 2;
   for (int i = 0; i < SETTINGS_N; i++) {
     bool sel = (i == settingsSel);
+    int ry = rowsTop + i * ROW_H;
+    if (sel) {
+      spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);   // orange left bar
+    }
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 6, my + 8 + i * 14);
-    spr.print(sel ? "> " : "  ");
+    spr.setCursor(mx + 8, ry + 3);
     spr.print(settingsItems[i]);
-    spr.setCursor(mx + mw - 36, my + 8 + i * 14);
-    spr.setTextColor(p.textDim, PANEL);
+    spr.setCursor(mx + mw - 38, ry + 3);
     if (i == 0) {
+      spr.setTextColor(p.body, PANEL);
       spr.printf("%u/4", brightLevel);
     } else if (i >= 1 && i <= 6) {
       spr.setTextColor(vals[i-1] ? GREEN : p.textDim, PANEL);
       spr.print(vals[i-1] ? " on" : "off");
     } else if (i == 7) {
       static const char* const RN[] = { "auto", "port", "land" };
+      spr.setTextColor(p.body, PANEL);
       spr.print(RN[s.clockRot]);
     } else if (i == 8) {
       uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
       uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
+      spr.setTextColor(p.body, PANEL);
       spr.printf("%u/%u", pos, total);
     }
   }
-  drawMenuHints(p, mx, mw, my + mh - 12, "Next", "Change");
+
+  // Footer hint
+  int fy = my + mh - FOOTER_H;
+  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
+  spr.setTextColor(p.textDim, PANEL);
+  spr.setCursor(mx + 6, fy + 4);
+  spr.print("A Next   B Change");
 }
 
 static void drawReset() {
   const Palette& p = characterPalette();
-  int mw = 118, mh = 16 + RESET_N * 14 + MENU_HINT_H;
-  int mx = (W - mw) / 2, my = (H - mh) / 2;
+  const int mw = W - 8, mx = 4;
+  const int HEADER_H = 22, FOOTER_H = 16, ROW_H = 22;
+  const int mh = HEADER_H + RESET_N * ROW_H + FOOTER_H;
+  const int my = (H - mh) / 2;
+
+  // Card chrome — red border to signal danger
   spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 4, HOT);
-  spr.setTextSize(1);
+
+  // Header pill — RED for reset
+  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, HOT);
+  spr.setTextSize(2);
+  spr.setTextColor(0x0000, HOT);
+  spr.setCursor(mx + 6, my + 4);
+  spr.print("RESET");
+
+  int rowsTop = my + HEADER_H + 2;
   for (int i = 0; i < RESET_N; i++) {
     bool sel = (i == resetSel);
-    spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 6, my + 8 + i * 14);
-    spr.print(sel ? "> " : "  ");
+    int ry = rowsTop + i * ROW_H;
+    if (sel) spr.fillRect(mx + 1, ry, 3, ROW_H - 2, p.body);
     bool armed = (i == resetConfirmIdx) &&
                  (int32_t)(millis() - resetConfirmUntil) < 0;
-    if (armed) spr.setTextColor(HOT, PANEL);
+    spr.setTextSize(2);
+    spr.setTextColor(armed ? HOT : (sel ? p.text : p.textDim), PANEL);
+    spr.setCursor(mx + 8, ry + 4);
     spr.print(armed ? "really?" : resetItems[i]);
   }
-  drawMenuHints(p, mx, mw, my + mh - 12);
+
+  // Footer
+  int fy = my + mh - FOOTER_H;
+  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
+  spr.setTextSize(1);
+  spr.setTextColor(p.textDim, PANEL);
+  spr.setCursor(mx + 6, fy + 4);
+  spr.print("A Next   B Confirm");
 }
 
 void menuConfirm() {
@@ -340,20 +389,47 @@ void menuConfirm() {
 
 void drawMenu() {
   const Palette& p = characterPalette();
-  int mw = 118, mh = 16 + MENU_N * 14 + MENU_HINT_H;
-  int mx = (W - mw) / 2, my = (H - mh) / 2;
+  const int mw = W - 8, mx = 4;
+  const int HEADER_H = 22, FOOTER_H = 16, ROW_H = 22;
+  const int mh = HEADER_H + MENU_N * ROW_H + FOOTER_H;
+  const int my = (H - mh) / 2;
+
+  // Card chrome
   spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
-  spr.setTextSize(1);
+
+  // Header pill — orange
+  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
+  spr.setTextSize(2);
+  spr.setTextColor(p.bg, p.body);
+  spr.setCursor(mx + 6, my + 4);
+  spr.print("MENU");
+
+  int rowsTop = my + HEADER_H + 2;
   for (int i = 0; i < MENU_N; i++) {
     bool sel = (i == menuSel);
+    int ry = rowsTop + i * ROW_H;
+    if (sel) spr.fillRect(mx + 1, ry, 3, ROW_H - 2, p.body);
+    spr.setTextSize(2);
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 6, my + 8 + i * 14);
-    spr.print(sel ? "> " : "  ");
+    spr.setCursor(mx + 8, ry + 4);
     spr.print(menuItems[i]);
-    if (i == 4) spr.print(dataDemo() ? "  on" : "  off");
+    if (i == 4) {
+      bool on = dataDemo();
+      spr.setTextSize(1);
+      spr.setTextColor(on ? GREEN : p.textDim, PANEL);
+      spr.setCursor(mx + mw - 28, ry + 8);
+      spr.print(on ? "on" : "off");
+    }
   }
-  drawMenuHints(p, mx, mw, my + mh - 12);
+
+  // Footer
+  int fy = my + mh - FOOTER_H;
+  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
+  spr.setTextSize(1);
+  spr.setTextColor(p.textDim, PANEL);
+  spr.setCursor(mx + 6, fy + 4);
+  spr.print("A Next   B Select");
 }
 
 // Clock orientation: gravity along the in-plane X axis means the stick is
@@ -564,28 +640,57 @@ bool checkShake() {
 // then a per-page section label below it. The fixed title is the cue that
 // B cycles pages here just like it does on PET.
 static void _infoHeader(const Palette& p, int& y, const char* section, uint8_t page) {
-  spr.setTextColor(p.text, p.bg);
-  spr.setCursor(4, y); spr.print("Info");
-  spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(W - 28, y); spr.printf("%u/%u", page + 1, INFO_PAGES);
-  y += 12;
-  spr.setTextColor(p.body, p.bg);
-  spr.setCursor(4, y); spr.print(section);
-  y += 12;
+  // Orange pill chip with section title + page counter on the right
+  const int HEADER_H = 22;
+  spr.fillRoundRect(4, y, W - 8, HEADER_H, 4, p.body);
+  spr.setTextSize(2);
+  spr.setTextColor(p.bg, p.body);
+  spr.setCursor(10, y + 4);
+  spr.print(section);
+  // Page counter right-aligned
+  char pb[8]; snprintf(pb, sizeof(pb), "%u/%u", page + 1, INFO_PAGES);
+  int plen = strlen(pb);
+  spr.setTextSize(1);
+  spr.setCursor(W - 12 - plen * 6, y + 8);
+  spr.print(pb);
+  spr.setTextSize(1);
+  y += HEADER_H + 6;
 }
 
 void drawPasskey() {
   const Palette& p = characterPalette();
+  const uint16_t BORDER = 0x05FF;   // cyan; named locally to avoid the
+                                    // CYAN macro from TFT_eSPI/In_eSPI.h
   spr.fillSprite(p.bg);
-  spr.setTextSize(1);
-  spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(8, 56);  spr.print("BLUETOOTH PAIRING");
-  spr.setCursor(8, 184); spr.print("enter on desktop:");
+
+  // Header pill — orange (consistent with menu/settings)
+  spr.fillRoundRect(4, 40, W - 8, 22, 4, p.body);
+  spr.setTextSize(2);
+  spr.setTextColor(p.bg, p.body);
+  spr.setCursor(10, 44);
+  spr.print("PAIRING");
+
+  // Cyan border around the digit group
+  char b[8]; snprintf(b, sizeof(b), "%06lu", (unsigned long)blePasskey());
+  const int digW = 18 * 6;            // 6 digits × 18 px at size 3
+  const int dx   = (W - digW) / 2 - 6;
+  const int dy   = 100;
+  const int dw   = digW + 12;
+  const int dh   = 30;
+  spr.drawRoundRect(dx,     dy,     dw,     dh,     5, BORDER);
+  spr.drawRoundRect(dx - 1, dy - 1, dw + 2, dh + 2, 6, BORDER);
+
   spr.setTextSize(3);
   spr.setTextColor(p.text, p.bg);
-  char b[8]; snprintf(b, sizeof(b), "%06lu", (unsigned long)blePasskey());
-  spr.setCursor((W - 18 * 6) / 2, 110);
+  spr.setCursor((W - digW) / 2, dy + 3);
   spr.print(b);
+
+  // Sub-line
+  spr.setTextSize(1);
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(8, 180); spr.print("enter on desktop");
+  spr.setCursor(8, 192); spr.print("> Developer");
+  spr.setCursor(8, 204); spr.print("> Hardware Buddy");
 }
 
 void drawInfo() {
