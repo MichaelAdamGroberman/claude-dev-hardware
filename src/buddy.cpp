@@ -71,33 +71,11 @@ void buddyPrint(const char* s)    { _tgt->setTextSize(_scale); _tgt->print(s); }
 TFT_eSPI* buddyTarget() { return _tgt; }
 
 // ──────────────── species registry ────────────────
+// Only gr0m ships in this fork — other species removed.
 extern const Species GR0M_SPECIES;
-extern const Species CAPYBARA_SPECIES;
-extern const Species DUCK_SPECIES;
-extern const Species GOOSE_SPECIES;
-extern const Species BLOB_SPECIES;
-extern const Species CAT_SPECIES;
-extern const Species DRAGON_SPECIES;
-extern const Species OCTOPUS_SPECIES;
-extern const Species OWL_SPECIES;
-extern const Species PENGUIN_SPECIES;
-extern const Species TURTLE_SPECIES;
-extern const Species SNAIL_SPECIES;
-extern const Species GHOST_SPECIES;
-extern const Species AXOLOTL_SPECIES;
-extern const Species CACTUS_SPECIES;
-extern const Species ROBOT_SPECIES;
-extern const Species RABBIT_SPECIES;
-extern const Species MUSHROOM_SPECIES;
-extern const Species CHONK_SPECIES;
 
 static const Species* SPECIES_TABLE[] = {
   &GR0M_SPECIES,
-  &CAPYBARA_SPECIES, &DUCK_SPECIES, &GOOSE_SPECIES, &BLOB_SPECIES,
-  &CAT_SPECIES, &DRAGON_SPECIES, &OCTOPUS_SPECIES, &OWL_SPECIES,
-  &PENGUIN_SPECIES, &TURTLE_SPECIES, &SNAIL_SPECIES, &GHOST_SPECIES,
-  &AXOLOTL_SPECIES, &CACTUS_SPECIES, &ROBOT_SPECIES, &RABBIT_SPECIES,
-  &MUSHROOM_SPECIES, &CHONK_SPECIES,
 };
 static const uint8_t N_SPECIES = sizeof(SPECIES_TABLE) / sizeof(SPECIES_TABLE[0]);
 static uint8_t currentSpeciesIdx = 0;

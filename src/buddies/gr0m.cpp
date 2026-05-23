@@ -44,15 +44,18 @@ static void readTilt() {
   axS = axS * 0.7f + ax * 0.3f;
   ayS = ayS * 0.7f + ay * 0.3f;
   // Wider range (±8) so the pseudo-3D head rotation reads clearly.
+  // Symmetric coefficients on both axes — up/down pitch matches the
+  // strength of left/right yaw so the head visibly looks up/down when
+  // the device is tilted forward/back, not just side-to-side.
   _tiltX = _clamp(axS *  8.0f, -8, 8);
-  _tiltY = _clamp(ayS *  6.0f, -6, 6);
+  _tiltY = _clamp(ayS *  8.0f, -8, 8);
   _gravX = _clamp(axS *  3.0f, -3, 3);
   // Build the actual 3D rotation matrix used by the cube renderer.
   // Yaw from ax (head turns left/right when device tilts side-to-side);
   // pitch from ay (head looks up/down when device pitches forward/back).
   // ±0.7 rad ≈ ±40° at max tilt — strong but not disorienting.
   float yaw   = -axS * 0.7f;
-  float pitch =  ayS * 0.5f;
+  float pitch =  ayS * 0.7f;
   buildRotation(yaw, pitch);
 }
 
