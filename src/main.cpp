@@ -722,16 +722,13 @@ void drawInfo() {
     lg("I watch your");
     lg("Claude desktop.");
     y += 4;
-    lg("I sleep when");
-    lg("nothing happens,");
-    lg("wake when you");
-    lg("start working,");
-    lg("get impatient on");
-    lg("pending prompts.");
+    lg("Sleep when idle,");
+    lg("wake when busy,");
+    lg("fret on prompts.");
     y += 4;
     spr.setTextColor(p.text, p.bg);
-    lg("Press A on a");
-    lg("prompt to approve.");
+    lg("Press A to");
+    lg("approve.");
 
   } else if (infoPage == 1) {
     _infoHeader(p, y, "BUTTONS", infoPage);
