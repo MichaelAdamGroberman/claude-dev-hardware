@@ -846,12 +846,6 @@ static void drawPetStats(const Palette& p) {
   int y = TOP + 16;
 
   spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(6, y - 2); spr.print("mood");
-  uint8_t mood = statsMoodTier();
-  uint16_t moodCol = (mood >= 3) ? RED : (mood >= 2) ? HOT : p.textDim;
-  for (int i = 0; i < 4; i++) tinyHeart(54 + i * 16, y + 2, i < mood, moodCol);
-
-  y += 20;
   spr.setCursor(6, y - 2); spr.print("fed");
   uint8_t fed = statsFedProgress();
   for (int i = 0; i < 10; i++) {
@@ -1101,10 +1095,13 @@ static void drawListeningIndicator() {
 void drawHUD() {
   if (tama.promptId[0]) { drawApproval(); return; }
   const Palette& p = characterPalette();
-  const int SHOW = 3, LH = 8, WIDTH = 21;
+  // Transcript bumped to setTextSize(2): glyphs are 12×16 px so WIDTH
+  // drops from 21 → 10 chars/line (10·12 = 120 px ≤ 135) and SHOW
+  // drops from 3 → 2 rows so the bottom strip still fits above the bot.
+  const int SHOW = 2, LH = 16, WIDTH = 10;
   const int AREA = SHOW * LH + 4;
   spr.fillRect(0, H - AREA, W, AREA, p.bg);
-  spr.setTextSize(1);
+  spr.setTextSize(1);   // banner below uses size-1 metrics
 
   // Response preview banner — shows the most recent `evt: turn` text from
   // the desktop for ~15s after it arrives, then fades. Single-line truncated.
@@ -1129,6 +1126,7 @@ void drawHUD() {
 
   if (tama.nLines == 0) {
     spr.setTextColor(p.text, p.bg);
+    spr.setTextSize(2);
     spr.setCursor(4, H - LH - 2);
     spr.print(tama.msg);
     return;
@@ -1151,6 +1149,7 @@ void drawHUD() {
   int end = (int)nDisp - msgScroll;
   int start = end - SHOW; if (start < 0) start = 0;
   uint8_t newest = tama.nLines - 1;
+  spr.setTextSize(2);
   for (int i = 0; start + i < end; i++) {
     uint8_t row = start + i;
     bool fresh = (srcOf[row] == newest) && (msgScroll == 0);
@@ -1159,6 +1158,7 @@ void drawHUD() {
     spr.print(disp[row]);
   }
   if (msgScroll > 0) {
+    spr.setTextSize(1);  // scroll counter stays small
     spr.setTextColor(p.body, p.bg);
     spr.setCursor(W - 18, H - LH - 2);
     spr.printf("-%u", msgScroll);

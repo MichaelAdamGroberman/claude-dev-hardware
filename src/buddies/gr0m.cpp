@@ -103,7 +103,8 @@ static V3 rotateV(V3 v) {
 // Object-space origin maps to (HX, HY + _yProjOff) on screen.
 static V2 projectV(V3 v) {
   const float CAM_DIST = 90.0f;
-  const float FOCAL    = 75.0f;
+  // Bumped from 75 → 97 to scale gr0m ~1.3× on the home screen.
+  const float FOCAL    = 97.0f;
   float z = v.z + CAM_DIST;
   if (z < 1.0f) z = 1.0f;
   return { (int)(HX + v.x * FOCAL / z),
