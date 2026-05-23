@@ -104,14 +104,21 @@ static V3 rotateV(V3 v) {
 
 // Perspective projection: camera at z = +CAM_DIST looking toward -z.
 // Object-space origin maps to (HX, HY + _yProjOff) on screen.
+//
+// PEEK MODE (buddyScale() == 1): on the PET/INFO screens the panel
+// content starts at y=70, so we halve FOCAL and shift the head anchor
+// up to y=32 so the bot tucks into the upper strip and doesn't bleed
+// over the panel. On the home screen (scale 2) we use the full 97 px
+// focal length and the original HY=55 anchor.
 static V2 projectV(V3 v) {
   const float CAM_DIST = 90.0f;
-  // Bumped from 75 → 97 to scale gr0m ~1.3× on the home screen.
-  const float FOCAL    = 97.0f;
+  bool peek = (buddyScale() == 1);
+  const float FOCAL = peek ? 50.0f : 97.0f;
+  const int   ANCHOR_Y = peek ? 32 : HY;
   float z = v.z + CAM_DIST;
   if (z < 1.0f) z = 1.0f;
   return { (int)(HX + v.x * FOCAL / z),
-           (int)(HY + _yProjOff + v.y * FOCAL / z) };
+           (int)(ANCHOR_Y + _yProjOff + v.y * FOCAL / z) };
 }
 
 // Rotate + project in one call — common pattern.
