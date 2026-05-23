@@ -1095,10 +1095,9 @@ static void drawListeningIndicator() {
 void drawHUD() {
   if (tama.promptId[0]) { drawApproval(); return; }
   const Palette& p = characterPalette();
-  // Transcript bumped to setTextSize(3): glyphs are 18×24 px so WIDTH
-  // drops to 7 chars/line (7·18 = 126 px ≤ 135) and SHOW stays at 2
-  // rows so the bottom strip still fits above the bot.
-  const int SHOW = 2, LH = 24, WIDTH = 7;
+  // Transcript at setTextSize(2): glyphs are 12×16 px so WIDTH = 10
+  // chars/line (10·12 = 120 px ≤ 135) and SHOW = 2 rows.
+  const int SHOW = 2, LH = 16, WIDTH = 10;
   const int AREA = SHOW * LH + 4;
   spr.fillRect(0, H - AREA, W, AREA, p.bg);
   spr.setTextSize(1);   // banner below uses size-1 metrics
@@ -1106,14 +1105,14 @@ void drawHUD() {
   // Response preview banner — shows the most recent `evt: turn` text from
   // the desktop for ~15s after it arrives, then fades. Single-line truncated.
   if (tama.responseRcvdMs != 0 && (millis() - tama.responseRcvdMs) < 15000) {
-    int by = H - AREA - 27;            // banner sits just above the entries
-    spr.fillRect(0, by, W, 26, 0x18C3); // dark slate background, taller for size-3 text
+    int by = H - AREA - 19;            // banner sits just above the entries
+    spr.fillRect(0, by, W, 18, 0x18C3); // dark slate background, taller for size-2 text
     spr.drawFastHLine(0, by, W, 0xFFE0);
     spr.setTextColor(0xFFFF, 0x18C3);
-    spr.setTextSize(3);
+    spr.setTextSize(2);
     spr.setCursor(3, by + 1);
     // Manual truncate with ">" sentinel so long previews fit the width
-    int maxChars = (W - 6) / 18;       // 18 px per char at size 3
+    int maxChars = (W - 6) / 12;       // 12 px per char at size 2
     int len = (int)strlen(tama.responsePreview);
     if (len <= maxChars) {
       spr.print(tama.responsePreview);
@@ -1128,7 +1127,7 @@ void drawHUD() {
 
   if (tama.nLines == 0) {
     spr.setTextColor(p.text, p.bg);
-    spr.setTextSize(3);
+    spr.setTextSize(2);
     spr.setCursor(4, H - LH - 2);
     spr.print(tama.msg);
     return;
@@ -1151,7 +1150,7 @@ void drawHUD() {
   int end = (int)nDisp - msgScroll;
   int start = end - SHOW; if (start < 0) start = 0;
   uint8_t newest = tama.nLines - 1;
-  spr.setTextSize(3);
+  spr.setTextSize(2);
   for (int i = 0; start + i < end; i++) {
     uint8_t row = start + i;
     bool fresh = (srcOf[row] == newest) && (msgScroll == 0);
@@ -1160,9 +1159,9 @@ void drawHUD() {
     spr.print(disp[row]);
   }
   if (msgScroll > 0) {
-    spr.setTextSize(3);
+    spr.setTextSize(2);
     spr.setTextColor(p.body, p.bg);
-    spr.setCursor(W - 54, H - LH - 2);  // 3 chars × 18 px at size 3 = 54 px
+    spr.setCursor(W - 36, H - LH - 2);  // 3 chars × 12 px at size 2 = 36 px
     spr.printf("-%u", msgScroll);
   }
 }
