@@ -1,7 +1,9 @@
 #include "net_wifi.h"
+#include "net_wg.h"
 #include "stats.h"
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Preferences.h>
 
 static WebServer _portal(80);
 static bool      _portalRunning = false;
@@ -21,8 +23,9 @@ body{font:14px -apple-system,system-ui,sans-serif;max-width:380px;margin:32px au
 h1{color:#ff2c20;margin:0 0 6px;letter-spacing:0.04em;font-weight:700}
 p{color:#888;font-size:13px;margin:4px 0 18px}
 label{display:block;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.08em;margin-top:14px;margin-bottom:4px}
-input{width:100%;padding:11px;background:#1a1a1a;border:1px solid #333;color:#e8e8e8;border-radius:3px;box-sizing:border-box;font:14px monospace}
-input:focus{outline:none;border-color:#ff2c20}
+input,textarea{width:100%;padding:11px;background:#1a1a1a;border:1px solid #333;color:#e8e8e8;border-radius:3px;box-sizing:border-box;font:14px monospace}
+input:focus,textarea:focus{outline:none;border-color:#ff2c20}
+textarea{resize:vertical}
 button{background:#ff2c20;color:#000;border:none;padding:13px 28px;font-weight:700;cursor:pointer;border-radius:3px;margin-top:20px;font-size:14px;letter-spacing:0.04em}
 button:hover{background:#ff5040}
 .bolt{display:inline-block;color:#ffe040;text-shadow:0 0 6px rgba(255,224,64,.6)}
@@ -37,9 +40,11 @@ small{color:#555;font-size:11px}
   <input name="pwd" type="password" placeholder="network password">
   <label>mac bridge (optional, stage 2+)</label>
   <input name="bridge" placeholder="192.168.1.20:6400">
+  <label>wireguard / tailnet config (optional)</label>
+  <textarea name="wg" rows="7" placeholder="paste a wg-quick config:&#10;[Interface]&#10;PrivateKey = ...&#10;Address = 10.20.30.5/24&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = host:51820&#10;AllowedIPs = 0.0.0.0/0"></textarea>
   <button type="submit">save &amp; restart</button>
 </form>
-<p><small>after save: gr0m reboots and joins the network. on success the chest bolt flashes green for 2 seconds.</small></p>
+<p><small>after save: gr0m reboots and joins the network. on success the chest bolt flashes green for 2 seconds. paste a WireGuard config to also bring up a tunnel to your tailnet.</small></p>
 </body></html>
 )H";
 
@@ -51,6 +56,7 @@ static void handleSave() {
   String ssid   = _portal.arg("ssid");
   String pwd    = _portal.arg("pwd");
   String bridge = _portal.arg("bridge");
+  String wg     = _portal.arg("wg");
 
   Preferences p;
   p.begin("buddy", false);
@@ -58,6 +64,12 @@ static void handleSave() {
   p.putString("wifi_pwd",  pwd);
   p.putString("wifi_brg",  bridge);
   p.end();
+
+  // Optional WireGuard config — parsed + stored under wg_* keys.
+  // netWgInit() picks it up on the next boot after WiFi is online.
+  if (wg.length() > 0) {
+    netWgSaveConfigFromText(wg.c_str());
+  }
 
   _portal.send(200, "text/html",
     "<html><body style='font:14px -apple-system,sans-serif;background:#0c0c0c;color:#e8e8e8;padding:40px;text-align:center'>"

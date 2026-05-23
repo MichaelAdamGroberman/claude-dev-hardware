@@ -6,6 +6,7 @@
 #include "buddy.h"
 #include "mic.h"
 #include "net_wifi.h"
+#include "net_wg.h"
 
 TFT_eSprite spr = TFT_eSprite(&M5.Lcd);
 // Offscreen sprite for the landscape-clock pet area. Eliminates the
@@ -827,8 +828,18 @@ void drawInfo() {
       ln(" Open Claude app");
       ln(" > Developer");
       ln(" > Hardware Buddy");
+    }
+    // WireGuard tunnel status — only shows once a tunnel is configured.
+    if (netWgState() != WG_OFF) {
       y += 4;
-      ln(" auto-reconnects");
+      spr.setTextColor(p.text, p.bg);
+      ln("VPN");
+      NetWgState ws = netWgState();
+      uint16_t wc = (ws == WG_UP) ? GREEN : (ws == WG_FAILED) ? HOT : 0xFFE0;
+      spr.setTextColor(wc, p.bg);
+      ln("  %s", ws == WG_UP ? "up" : ws == WG_FAILED ? "failed" : "connecting");
+      spr.setTextColor(p.textDim, p.bg);
+      if (ws == WG_UP) ln("  %s", netWgTunnelIP());
     }
 
   } else {
@@ -1544,6 +1555,16 @@ void loop() {
 
   // Pump the WiFi config portal (no-op when not in AP mode)
   netWifiTick();
+
+  // WireGuard tunnel: bring it up once, the first time WiFi reaches
+  // ONLINE, then pump its status poll each loop. netWgInit() no-ops
+  // if there's no wg_* config in NVS.
+  static bool _wgStarted = false;
+  if (!_wgStarted && netWifiOnline()) {
+    _wgStarted = true;
+    netWgInit();
+  }
+  if (_wgStarted) netWgTick();
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;
