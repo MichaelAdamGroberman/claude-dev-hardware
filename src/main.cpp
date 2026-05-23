@@ -916,7 +916,17 @@ static void drawApproval() {
   spr.setTextColor(0x0000, ALARM);
   spr.setCursor(6, TOP + 4);
   spr.print("APPROVE");
+  // Source badge — bridge tags prompts with "cli" / "app" / "mob".
+  // Sits to the right of APPROVE in size 1 so you can tell at a glance
+  // whether the prompt came from Claude Code, the desktop app, etc.
+  if (tama.promptSrc[0]) {
+    spr.setTextSize(1);
+    spr.setTextColor(0xFFFF, ALARM);
+    spr.setCursor(6 + 7 * 12 + 4, TOP + 8);
+    spr.print(tama.promptSrc);
+  }
   // elapsed time, right-aligned, turns yellow after 10s
+  spr.setTextSize(2);
   char tb[8]; snprintf(tb, sizeof(tb), "%lus", (unsigned long)waited);
   int tlen = strlen(tb);
   spr.setTextColor(waited >= 10 ? 0xFFE0 : 0x0000, ALARM);

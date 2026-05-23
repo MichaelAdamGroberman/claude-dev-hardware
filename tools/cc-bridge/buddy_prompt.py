@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""
+buddy-prompt — Claude Code PreToolUse hook that asks the Hardware
+Buddy device to approve or deny a tool call.
+
+Claude Code hook contract:
+  - stdin: JSON describing the tool call ({tool_name, tool_input, …})
+  - exit 0 with no stdout = pass through (Claude shows its own prompt)
+  - stdout JSON with {"decision":"approve"|"block","reason":"…"}
+    overrides the default and tells Claude what to do
+
+We talk to buddy_bridged.py over its Unix socket, wait for the user to
+press A (approve) or B (deny) on the device, and translate that into the
+hook's response format.
+
+Behavior:
+  - device approves → {"decision":"approve"} (Claude runs the tool)
+  - device denies  → {"decision":"block","reason":"denied on Hardware Buddy"}
+  - timeout / no device → exit 0 with no output (Claude falls back to its
+    own confirmation prompt, so you're never locked out if the device
+    is offline)
+"""
+from __future__ import annotations
+
+import json
+import socket
+import sys
+from pathlib import Path
+
+SOCK_PATH = Path.home() / ".cache" / "claude-buddy" / "buddy.sock"
+# How long the device has to react. Default matches the firmware's own
+# 30s "approve?" timer. Override per-tool by setting BUDDY_TIMEOUT in the
+# hook environment.
+DEFAULT_TIMEOUT_S = 30
+
+
+def main() -> int:
+    # Read the hook payload from stdin.
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        # No payload, nothing to gate — pass through silently.
+        return 0
+
+    tool_name = payload.get("tool_name", "?")
+    tool_input = payload.get("tool_input", {}) or {}
+    # Build a short hint string. Bash commands are the most important
+    # case so prefer the command itself; otherwise pick a meaningful
+    # input field if we recognize one.
+    if tool_name == "Bash":
+        hint = tool_input.get("command", "")
+    elif tool_name in ("Read", "Edit", "Write"):
+        hint = tool_input.get("file_path", "") or tool_input.get("path", "")
+    else:
+        # Generic fallback — first string-ish value in tool_input.
+        hint = ""
+        for v in tool_input.values():
+            if isinstance(v, str):
+                hint = v
+                break
+
+    # Open socket.
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(DEFAULT_TIMEOUT_S + 5)
+        sock.connect(str(SOCK_PATH))
+    except (FileNotFoundError, ConnectionRefusedError, socket.error):
+        # No daemon running — fall back to Claude's own prompt.
+        return 0
+
+    req = {
+        "op": "prompt",
+        "tool": tool_name,
+        "hint": hint,
+        "src": "cli",
+        "timeout": DEFAULT_TIMEOUT_S,
+    }
+    try:
+        sock.sendall((json.dumps(req) + "\n").encode("utf-8"))
+        # Read one line of reply.
+        buf = b""
+        while b"\n" not in buf:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+        reply = json.loads(buf.decode("utf-8").splitlines()[0])
+    except Exception:
+        return 0
+    finally:
+        sock.close()
+
+    decision = reply.get("decision", "")
+    if decision == "once":
+        print(json.dumps({"decision": "approve"}))
+        return 0
+    if decision == "deny":
+        print(json.dumps({
+            "decision": "block",
+            "reason": "denied on Hardware Buddy",
+        }))
+        return 0
+    # timeout / disconnected / unknown → fall through to Claude's prompt
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,18 @@
+{
+  "_comment": "Drop this into ~/.claude/settings.json (merge with existing hooks).",
+  "_comment2": "Adjust the matcher to gate only the tools you care about — see Claude Code docs.",
+
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/michaelgroberman/Downloads/claude-desktop-buddy-main/tools/cc-bridge/buddy_prompt.py"
+          }
+        ]
+      }
+    ]
+  }
+}

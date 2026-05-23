@@ -19,6 +19,7 @@ struct TamaState {
   char     promptId[40];     // pending permission request ID; empty = no prompt
   char     promptTool[20];
   char     promptHint[44];
+  char     promptSrc[8];     // "cli" / "app" / "mob"; "" = legacy/desktop
   // Last assistant turn — populated by `evt: turn` events from desktop.
   // Truncated to fit a banner; full content events can be much longer.
   char     responsePreview[96];
@@ -160,12 +161,13 @@ static void _applyJson(const char* line, TamaState* out) {
   }
   JsonObject pr = doc["prompt"];
   if (!pr.isNull()) {
-    const char* pid = pr["id"]; const char* pt = pr["tool"]; const char* ph = pr["hint"];
+    const char* pid = pr["id"]; const char* pt = pr["tool"]; const char* ph = pr["hint"]; const char* ps = pr["src"];
     strncpy(out->promptId,   pid ? pid : "", sizeof(out->promptId)-1);   out->promptId[sizeof(out->promptId)-1]=0;
     strncpy(out->promptTool, pt  ? pt  : "", sizeof(out->promptTool)-1); out->promptTool[sizeof(out->promptTool)-1]=0;
     strncpy(out->promptHint, ph  ? ph  : "", sizeof(out->promptHint)-1); out->promptHint[sizeof(out->promptHint)-1]=0;
+    strncpy(out->promptSrc,  ps  ? ps  : "", sizeof(out->promptSrc)-1);  out->promptSrc[sizeof(out->promptSrc)-1]=0;
   } else {
-    out->promptId[0] = 0; out->promptTool[0] = 0; out->promptHint[0] = 0;
+    out->promptId[0] = 0; out->promptTool[0] = 0; out->promptHint[0] = 0; out->promptSrc[0] = 0;
   }
   out->lastUpdated = millis();
   _lastLiveMs = millis();
