@@ -1106,13 +1106,14 @@ void drawHUD() {
   // Response preview banner — shows the most recent `evt: turn` text from
   // the desktop for ~15s after it arrives, then fades. Single-line truncated.
   if (tama.responseRcvdMs != 0 && (millis() - tama.responseRcvdMs) < 15000) {
-    int by = H - AREA - 11;            // banner sits just above the entries
-    spr.fillRect(0, by, W, 10, 0x18C3); // dark slate background
+    int by = H - AREA - 19;            // banner sits just above the entries
+    spr.fillRect(0, by, W, 18, 0x18C3); // dark slate background, taller for size-2 text
     spr.drawFastHLine(0, by, W, 0xFFE0);
     spr.setTextColor(0xFFFF, 0x18C3);
+    spr.setTextSize(2);
     spr.setCursor(3, by + 1);
-    // Manual truncate with "…" sentinel so long previews fit the width
-    int maxChars = (W - 6) / 6;        // 6 px per char at size 1
+    // Manual truncate with ">" sentinel so long previews fit the width
+    int maxChars = (W - 6) / 12;       // 12 px per char at size 2
     int len = (int)strlen(tama.responsePreview);
     if (len <= maxChars) {
       spr.print(tama.responsePreview);
@@ -1120,6 +1121,7 @@ void drawHUD() {
       for (int i = 0; i < maxChars - 1; i++) spr.print(tama.responsePreview[i]);
       spr.print('>');                  // truncation marker
     }
+    spr.setTextSize(1);                // restore default for whatever follows
   }
 
   if (tama.lineGen != lastLineGen) { msgScroll = 0; lastLineGen = tama.lineGen; wake(); }
@@ -1158,9 +1160,9 @@ void drawHUD() {
     spr.print(disp[row]);
   }
   if (msgScroll > 0) {
-    spr.setTextSize(1);  // scroll counter stays small
+    spr.setTextSize(2);
     spr.setTextColor(p.body, p.bg);
-    spr.setCursor(W - 18, H - LH - 2);
+    spr.setCursor(W - 36, H - LH - 2);  // 3 chars × 12 px at size 2 = 36 px
     spr.printf("-%u", msgScroll);
   }
 }
