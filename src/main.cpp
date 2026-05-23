@@ -640,20 +640,19 @@ bool checkShake() {
 // then a per-page section label below it. The fixed title is the cue that
 // B cycles pages here just like it does on PET.
 static void _infoHeader(const Palette& p, int& y, const char* section, uint8_t page) {
-  // Orange pill chip with section title + page counter on the right
-  const int HEADER_H = 22;
-  spr.fillRoundRect(4, y, W - 8, HEADER_H, 4, p.body);
-  spr.setTextSize(2);
+  // Smaller orange pill — label dropped to size 1 and pill height
+  // shrunk 22 → 14 px so it's less visually dominant on every Info page.
+  const int HEADER_H = 14;
+  spr.fillRoundRect(4, y, W - 8, HEADER_H, 3, p.body);
+  spr.setTextSize(1);
   spr.setTextColor(p.bg, p.body);
-  spr.setCursor(10, y + 4);
+  spr.setCursor(8, y + 4);
   spr.print(section);
   // Page counter right-aligned
   char pb[8]; snprintf(pb, sizeof(pb), "%u/%u", page + 1, INFO_PAGES);
   int plen = strlen(pb);
-  spr.setTextSize(1);
-  spr.setCursor(W - 12 - plen * 6, y + 8);
+  spr.setCursor(W - 8 - plen * 6, y + 4);
   spr.print(pb);
-  spr.setTextSize(1);
   y += HEADER_H + 6;
 }
 
@@ -699,44 +698,46 @@ void drawInfo() {
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
   spr.setTextSize(1);
   int y = TOP + 2;
+  // ln() — size 1 (data pages: CLAUDE / DEVICE / BLUETOOTH kv rows fit).
   auto ln = [&](const char* fmt, ...) {
     char b[32]; va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
+    spr.setTextSize(1);
     spr.setCursor(4, y); spr.print(b); y += 8;
+  };
+  // lg() — size 2 (paragraph pages: ABOUT / BUTTONS / CREDITS get
+  // larger body text. Strings hand-rewrapped to fit ~10 chars/line.)
+  auto lg = [&](const char* fmt, ...) {
+    char b[32]; va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
+    spr.setTextSize(2);
+    spr.setCursor(4, y); spr.print(b); y += 14;
   };
 
   if (infoPage == 0) {
     _infoHeader(p, y, "ABOUT", infoPage);
     spr.setTextColor(p.textDim, p.bg);
-    ln("I watch your Claude");
-    ln("desktop sessions.");
-    y += 6;
-    ln("I sleep when nothing's");
-    ln("happening, wake when");
-    ln("you start working,");
-    ln("get impatient when");
-    ln("approvals pile up.");
-    y += 6;
+    lg("I watch");
+    lg("your Claude");
+    lg("desktop.");
+    y += 4;
+    lg("I sleep,");
+    lg("wake, get");
+    lg("impatient");
+    lg("on prompts.");
+    y += 4;
     spr.setTextColor(p.text, p.bg);
-    ln("Press A on a prompt");
-    ln("to approve from here.");
-    y += 6;
-    spr.setTextColor(p.textDim, p.bg);
-    ln("18 species. Settings");
-    ln("> ascii pet to cycle.");
+    lg("Press A");
+    lg("to approve.");
 
   } else if (infoPage == 1) {
     _infoHeader(p, y, "BUTTONS", infoPage);
-    spr.setTextColor(p.text, p.bg);    ln("A   front");
-    spr.setTextColor(p.textDim, p.bg); ln("    next screen");
-    ln("    approve prompt"); y += 4;
-    spr.setTextColor(p.text, p.bg);    ln("B   right side");
-    spr.setTextColor(p.textDim, p.bg); ln("    next page");
-    ln("    deny prompt"); y += 4;
-    spr.setTextColor(p.text, p.bg);    ln("hold A");
-    spr.setTextColor(p.textDim, p.bg); ln("    menu"); y += 4;
-    spr.setTextColor(p.text, p.bg);    ln("Power  left side");
-    spr.setTextColor(p.textDim, p.bg); ln("    tap = screen off");
-    ln("    hold 6s = off");
+    spr.setTextColor(p.text, p.bg);    lg("A  front");
+    spr.setTextColor(p.textDim, p.bg); lg("  next/OK");
+    spr.setTextColor(p.text, p.bg);    lg("B  right");
+    spr.setTextColor(p.textDim, p.bg); lg("  page/deny");
+    spr.setTextColor(p.text, p.bg);    lg("hold A");
+    spr.setTextColor(p.textDim, p.bg); lg("  open menu");
+    spr.setTextColor(p.text, p.bg);    lg("Power");
+    spr.setTextColor(p.textDim, p.bg); lg("  6s = off");
 
   } else if (infoPage == 2) {
     _infoHeader(p, y, "CLAUDE", infoPage);
@@ -831,23 +832,18 @@ void drawInfo() {
   } else {
     _infoHeader(p, y, "CREDITS", infoPage);
     spr.setTextColor(p.textDim, p.bg);
-    ln("made by");
+    lg("made by");
     y += 4;
     spr.setTextColor(p.text, p.bg);
-    ln("Michael Groberman");
-    y += 12;
+    lg("Michael");
+    lg("Groberman");
+    y += 6;
     spr.setTextColor(p.textDim, p.bg);
-    ln("source");
+    lg("hardware");
     y += 4;
     spr.setTextColor(p.text, p.bg);
-    ln("github.com/anthropics");
-    ln("/claude-desktop-buddy");
-    y += 12;
-    spr.setTextColor(p.textDim, p.bg);
-    ln("hardware");
-    y += 4;
-    ln("M5StickC Plus");
-    ln("ESP32 + AXP192");
+    lg("M5StickC+");
+    lg("ESP32");
   }
 }
 
