@@ -104,21 +104,14 @@ static V3 rotateV(V3 v) {
 
 // Perspective projection: camera at z = +CAM_DIST looking toward -z.
 // Object-space origin maps to (HX, HY + _yProjOff) on screen.
-//
-// PEEK MODE (buddyScale() == 1): on the PET/INFO screens the panel
-// content starts at y=70, so we halve FOCAL and shift the head anchor
-// up to y=32 so the bot tucks into the upper strip and doesn't bleed
-// over the panel. On the home screen (scale 2) we use the full 97 px
-// focal length and the original HY=55 anchor.
 static V2 projectV(V3 v) {
   const float CAM_DIST = 90.0f;
-  bool peek = (buddyScale() == 1);
-  const float FOCAL = peek ? 50.0f : 97.0f;
-  const int   ANCHOR_Y = peek ? 32 : HY;
+  // Bumped from 75 → 97 to scale gr0m ~1.3× on the home screen.
+  const float FOCAL    = 97.0f;
   float z = v.z + CAM_DIST;
   if (z < 1.0f) z = 1.0f;
   return { (int)(HX + v.x * FOCAL / z),
-           (int)(ANCHOR_Y + _yProjOff + v.y * FOCAL / z) };
+           (int)(HY + _yProjOff + v.y * FOCAL / z) };
 }
 
 // Rotate + project in one call — common pattern.
@@ -185,7 +178,6 @@ static void drawLeaf(int x, int y, uint16_t c) {
 // Soft drop shadow beneath the robot — offset by tilt so it tracks the
 // "light source" direction, giving a fake-3D "lifted off screen" feel.
 static void drawShadow(int yOff) {
-  if (buddyScale() == 1) return;   // 2D helpers use home HX/HY — skip in peek
   int sx = HX + _tiltX * 2;
   int sy = HY + 60 + yOff;
   // 3-ring soft shadow, darkest at center
@@ -753,7 +745,6 @@ static void drawChest(uint16_t boltColor, int yOff) {
 // and it droops down-right. The shaft is drawn as a thin diagonal line
 // instead of a horizontal rect, so the angle is visible.
 static void drawJointInMouth(uint32_t t, bool lit, int yOff) {
-  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int jY = HY + 14 + yOff + fy;
@@ -782,7 +773,6 @@ static void drawJointInMouth(uint32_t t, bool lit, int yOff) {
 // Also follows the joint tip's drop angle so the smoke trail starts
 // at the actual ember position.
 static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
-  if (buddyScale() == 1) return;
   if (intensity <= 0) return;
   int fx = faceOffX();
   int fy = faceOffY();
@@ -813,7 +803,6 @@ static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
 
 // Glasses tumbling in upper-left, cycles through 4 orientation poses
 static void drawDiscardedGlasses(uint32_t t) {
-  if (buddyScale() == 1) return;
   // Static base position with small arc bob
   static const int8_t BOB_X[4] = { 0, 2, 4, 2 };
   static const int8_t BOB_Y[4] = { 0, -2, 0, 2 };
@@ -860,7 +849,6 @@ static void drawDiscardedGlasses(uint32_t t) {
 
 // Joint tumbling in upper-right with trailing smoke
 static void drawDiscardedJoint(uint32_t t) {
-  if (buddyScale() == 1) return;
   static const int8_t BOB_X[4] = { 0, -2, -4, -2 };
   static const int8_t BOB_Y[4] = { 0, -3, 0, 3 };
   uint8_t pose = (t / 3) % 4;
@@ -911,7 +899,6 @@ static void drawDiscardedJoint(uint32_t t) {
 // Hearts → leaves. Hearts rise on the left, morphing to green leaves
 // at the half-life of their flight.
 static void drawMoodParticles(uint32_t t, int n, int speed) {
-  if (buddyScale() == 1) return;
   const int LIFECYCLE = 28;
   const int MORPH = LIFECYCLE / 2;
   int baseX = -32;
@@ -938,7 +925,6 @@ static void drawMoodParticles(uint32_t t, int n, int speed) {
 // Drawn AFTER the head so it overlays. Tracks face-plane offset so it
 // rides with head rotation.
 static void drawHeadphones() {
-  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int cx = HX + fx;
@@ -986,7 +972,6 @@ static void drawHandsAtLaptop() {
 // Tiny laptop sat in front of gr0m, glowing green screen with fake code.
 // Drawn between chest and bottom edge of screen so it reads as "on lap".
 static void drawLaptop(uint32_t t) {
-  if (buddyScale() == 1) return;
   int cx = HX;
   int kx = cx - 20, ky = HY + 36;  // keyboard base
   int kw = 40, kh = 3;
@@ -1018,7 +1003,6 @@ static void drawLaptop(uint32_t t) {
 // outline and a tail. Text rendered in `textColor`. Position auto-clamps
 // to keep the bubble inside the 135px-wide screen, even with long text.
 static void drawSpeechBubble(const char* text, uint16_t textColor) {
-  if (buddyScale() == 1) return;
   int len = 0; while (text[len]) len++;
   int w = len * 6 + 6;
   // Place to the upper-right of the head, but clamp so right edge ≤ 134.
@@ -1043,7 +1027,6 @@ static void drawSpeechBubble(const char* text, uint16_t textColor) {
 
 // Party hat — pointy triangle on top of head with stripes and a pom.
 static void drawPartyHat() {
-  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int hx = HX + fx;
@@ -1060,7 +1043,6 @@ static void drawPartyHat() {
 
 // Nightcap — drooping cap that hangs to the right, white trim band, pom.
 static void drawNightcap() {
-  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
   int hx = HX + fx;
@@ -1083,7 +1065,6 @@ static void drawNightcap() {
 
 // Z particles drifting up — used in sleep state.
 static void drawZParticles(uint32_t t) {
-  if (buddyScale() == 1) return;
   _t->setTextColor(SPECULAR, BUDDY_BG);
   _t->setTextSize(1);
   int p1 = (int)(t * 2) % 30;
@@ -1102,7 +1083,6 @@ static void drawZParticles(uint32_t t) {
 
 // Confetti rain — for celebrate.
 static void drawConfetti(uint32_t t) {
-  if (buddyScale() == 1) return;
   static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, EMBER_HOT };
   for (int i = 0; i < 14; i++) {
     int phase = ((int)t * 2 + i * 11) % 40;
@@ -1117,7 +1097,6 @@ static void drawConfetti(uint32_t t) {
 
 // Extra heart cloud — sparser but with bigger hearts. Heart state only.
 static void drawHeartCloud(uint32_t t) {
-  if (buddyScale() == 1) return;
   static const int8_t HPOS[][2] = {
     {18, 50}, {28, 28}, {10, 92}, {110, 38}, {118, 72}, {102, 100}
   };
@@ -1173,7 +1152,23 @@ static void doIdle(uint32_t t) {
   _yProjOff = 0;
   drawShadow(0);
   drawChest3D();
-  drawBolt3D(VISOR_IDLE);
+  // NEW: cycle the chest bolt with a tiny green LCD showing live token count.
+  // 14 frames bolt, 6 frames LCD — keeps the brand mark dominant but lets
+  // the readout flicker into view occasionally so idle reads as "alive,
+  // counting".
+  bool lcdFrame = ((t / 5) % 4) == 0;
+  if (lcdFrame) {
+    // chest LCD swap — tokens with K/M shortening so it always fits 4 chars
+    extern TamaState tama;
+    char buf[8];
+    uint32_t v = tama.tokens;
+    if (v >= 1000000)   snprintf(buf, sizeof(buf), "%luM", v / 1000000);
+    else if (v >= 1000) snprintf(buf, sizeof(buf), "%luK", v / 1000);
+    else                snprintf(buf, sizeof(buf), "%lu", (unsigned long)v);
+    drawChestLCD(buf);
+  } else {
+    drawBolt3D(VISOR_IDLE);
+  }
   drawNeck3D();
   drawHead3D();
   drawVisor3D(VISOR_IDLE);

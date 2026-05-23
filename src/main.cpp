@@ -267,107 +267,58 @@ static void drawMenuHints(const Palette& p, int mx, int mw, int hy,
   spr.fillTriangle(x, hy, x, hy + 6, x + 5, hy + 3, p.textDim);
 }
 
-// v2 design: full-width card, orange header pill, 4-px orange left bar
-// marks the selected row, dim divider above the footer hint strip.
-// Settings stays at size 1 because "brightness"/"transcript" are 10
-// chars wide and at size 2 (12 px/char) the label overflows the value
-// column. Menu and Reset move to size 2 — those lists are shorter.
-
 static void drawSettings() {
   const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 14;
-  const int mh = HEADER_H + SETTINGS_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  // Card chrome
+  int mw = 118, mh = 16 + SETTINGS_N * 14 + MENU_HINT_H;
+  int mx = (W - mw) / 2, my = (H - mh) / 2;
   spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
-
-  // Header pill
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
   spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(mx + 6, my + 6);
-  spr.print("SETTINGS");
-
   Settings& s = settings();
   bool vals[] = { s.sound, s.bt, s.wifi, s.led, s.mic, s.hud };
-  int rowsTop = my + HEADER_H + 2;
   for (int i = 0; i < SETTINGS_N; i++) {
     bool sel = (i == settingsSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) {
-      spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);   // orange left bar
-    }
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 8, ry + 3);
+    spr.setCursor(mx + 6, my + 8 + i * 14);
+    spr.print(sel ? "> " : "  ");
     spr.print(settingsItems[i]);
-    spr.setCursor(mx + mw - 38, ry + 3);
+    spr.setCursor(mx + mw - 36, my + 8 + i * 14);
+    spr.setTextColor(p.textDim, PANEL);
     if (i == 0) {
-      spr.setTextColor(p.body, PANEL);
       spr.printf("%u/4", brightLevel);
     } else if (i >= 1 && i <= 6) {
       spr.setTextColor(vals[i-1] ? GREEN : p.textDim, PANEL);
       spr.print(vals[i-1] ? " on" : "off");
     } else if (i == 7) {
       static const char* const RN[] = { "auto", "port", "land" };
-      spr.setTextColor(p.body, PANEL);
       spr.print(RN[s.clockRot]);
     } else if (i == 8) {
       uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
       uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
-      spr.setTextColor(p.body, PANEL);
       spr.printf("%u/%u", pos, total);
     }
   }
-
-  // Footer hint
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Change");
+  drawMenuHints(p, mx, mw, my + mh - 12, "Next", "Change");
 }
 
 static void drawReset() {
   const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 22, FOOTER_H = 16, ROW_H = 22;
-  const int mh = HEADER_H + RESET_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  // Card chrome — red border to signal danger
+  int mw = 118, mh = 16 + RESET_N * 14 + MENU_HINT_H;
+  int mx = (W - mw) / 2, my = (H - mh) / 2;
   spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 4, HOT);
-
-  // Header pill — RED for reset
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, HOT);
-  spr.setTextSize(2);
-  spr.setTextColor(0x0000, HOT);
-  spr.setCursor(mx + 6, my + 4);
-  spr.print("RESET");
-
-  int rowsTop = my + HEADER_H + 2;
+  spr.setTextSize(1);
   for (int i = 0; i < RESET_N; i++) {
     bool sel = (i == resetSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) spr.fillRect(mx + 1, ry, 3, ROW_H - 2, p.body);
+    spr.setTextColor(sel ? p.text : p.textDim, PANEL);
+    spr.setCursor(mx + 6, my + 8 + i * 14);
+    spr.print(sel ? "> " : "  ");
     bool armed = (i == resetConfirmIdx) &&
                  (int32_t)(millis() - resetConfirmUntil) < 0;
-    spr.setTextSize(2);
-    spr.setTextColor(armed ? HOT : (sel ? p.text : p.textDim), PANEL);
-    spr.setCursor(mx + 8, ry + 4);
+    if (armed) spr.setTextColor(HOT, PANEL);
     spr.print(armed ? "really?" : resetItems[i]);
   }
-
-  // Footer
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextSize(1);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Confirm");
+  drawMenuHints(p, mx, mw, my + mh - 12);
 }
 
 void menuConfirm() {
@@ -389,47 +340,20 @@ void menuConfirm() {
 
 void drawMenu() {
   const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 22, FOOTER_H = 16, ROW_H = 22;
-  const int mh = HEADER_H + MENU_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  // Card chrome
+  int mw = 118, mh = 16 + MENU_N * 14 + MENU_HINT_H;
+  int mx = (W - mw) / 2, my = (H - mh) / 2;
   spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
-
-  // Header pill — orange
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
-  spr.setTextSize(2);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(mx + 6, my + 4);
-  spr.print("MENU");
-
-  int rowsTop = my + HEADER_H + 2;
+  spr.setTextSize(1);
   for (int i = 0; i < MENU_N; i++) {
     bool sel = (i == menuSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) spr.fillRect(mx + 1, ry, 3, ROW_H - 2, p.body);
-    spr.setTextSize(2);
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 8, ry + 4);
+    spr.setCursor(mx + 6, my + 8 + i * 14);
+    spr.print(sel ? "> " : "  ");
     spr.print(menuItems[i]);
-    if (i == 4) {
-      bool on = dataDemo();
-      spr.setTextSize(1);
-      spr.setTextColor(on ? GREEN : p.textDim, PANEL);
-      spr.setCursor(mx + mw - 28, ry + 8);
-      spr.print(on ? "on" : "off");
-    }
+    if (i == 4) spr.print(dataDemo() ? "  on" : "  off");
   }
-
-  // Footer
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextSize(1);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Select");
+  drawMenuHints(p, mx, mw, my + mh - 12);
 }
 
 // Clock orientation: gravity along the in-plane X axis means the stick is
@@ -640,56 +564,28 @@ bool checkShake() {
 // then a per-page section label below it. The fixed title is the cue that
 // B cycles pages here just like it does on PET.
 static void _infoHeader(const Palette& p, int& y, const char* section, uint8_t page) {
-  // Smaller orange pill — label dropped to size 1 and pill height
-  // shrunk 22 → 14 px so it's less visually dominant on every Info page.
-  const int HEADER_H = 14;
-  spr.fillRoundRect(4, y, W - 8, HEADER_H, 3, p.body);
-  spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(8, y + 4);
-  spr.print(section);
-  // Page counter right-aligned
-  char pb[8]; snprintf(pb, sizeof(pb), "%u/%u", page + 1, INFO_PAGES);
-  int plen = strlen(pb);
-  spr.setCursor(W - 8 - plen * 6, y + 4);
-  spr.print(pb);
-  y += HEADER_H + 6;
+  spr.setTextColor(p.text, p.bg);
+  spr.setCursor(4, y); spr.print("Info");
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(W - 28, y); spr.printf("%u/%u", page + 1, INFO_PAGES);
+  y += 12;
+  spr.setTextColor(p.body, p.bg);
+  spr.setCursor(4, y); spr.print(section);
+  y += 12;
 }
 
 void drawPasskey() {
   const Palette& p = characterPalette();
-  const uint16_t BORDER = 0x05FF;   // cyan; named locally to avoid the
-                                    // CYAN macro from TFT_eSPI/In_eSPI.h
   spr.fillSprite(p.bg);
-
-  // Header pill — orange (consistent with menu/settings)
-  spr.fillRoundRect(4, 40, W - 8, 22, 4, p.body);
-  spr.setTextSize(2);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(10, 44);
-  spr.print("PAIRING");
-
-  // Cyan border around the digit group
-  char b[8]; snprintf(b, sizeof(b), "%06lu", (unsigned long)blePasskey());
-  const int digW = 18 * 6;            // 6 digits × 18 px at size 3
-  const int dx   = (W - digW) / 2 - 6;
-  const int dy   = 100;
-  const int dw   = digW + 12;
-  const int dh   = 30;
-  spr.drawRoundRect(dx,     dy,     dw,     dh,     5, BORDER);
-  spr.drawRoundRect(dx - 1, dy - 1, dw + 2, dh + 2, 6, BORDER);
-
-  spr.setTextSize(3);
-  spr.setTextColor(p.text, p.bg);
-  spr.setCursor((W - digW) / 2, dy + 3);
-  spr.print(b);
-
-  // Sub-line
   spr.setTextSize(1);
   spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(8, 180); spr.print("enter on desktop");
-  spr.setCursor(8, 192); spr.print("> Developer");
-  spr.setCursor(8, 204); spr.print("> Hardware Buddy");
+  spr.setCursor(8, 56);  spr.print("BLUETOOTH PAIRING");
+  spr.setCursor(8, 184); spr.print("enter on desktop:");
+  spr.setTextSize(3);
+  spr.setTextColor(p.text, p.bg);
+  char b[8]; snprintf(b, sizeof(b), "%06lu", (unsigned long)blePasskey());
+  spr.setCursor((W - 18 * 6) / 2, 110);
+  spr.print(b);
 }
 
 void drawInfo() {
@@ -698,48 +594,44 @@ void drawInfo() {
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
   spr.setTextSize(1);
   int y = TOP + 2;
-  // ln() — size 1 (data pages: CLAUDE / DEVICE / BLUETOOTH kv rows fit).
   auto ln = [&](const char* fmt, ...) {
     char b[32]; va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
-    spr.setTextSize(1);
     spr.setCursor(4, y); spr.print(b); y += 8;
-  };
-  // lg() — TFT_eSPI built-in Font 2 (8×16 proportional, ~16 chars/line).
-  // Bigger than the default size-1 font but slimmer than setTextSize(2)
-  // so more text fits per line while still being legible. Resets to
-  // Font 1 on exit so callers that assume default+setTextSize still work.
-  auto lg = [&](const char* fmt, ...) {
-    char b[32]; va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
-    spr.setTextFont(2);
-    spr.setTextSize(1);
-    spr.setCursor(4, y); spr.print(b); y += 16;
-    spr.setTextFont(1);
   };
 
   if (infoPage == 0) {
     _infoHeader(p, y, "ABOUT", infoPage);
     spr.setTextColor(p.textDim, p.bg);
-    lg("I watch your");
-    lg("Claude desktop.");
-    y += 4;
-    lg("Sleep when idle,");
-    lg("wake when busy,");
-    lg("fret on prompts.");
-    y += 4;
+    ln("I watch your Claude");
+    ln("desktop sessions.");
+    y += 6;
+    ln("I sleep when nothing's");
+    ln("happening, wake when");
+    ln("you start working,");
+    ln("get impatient when");
+    ln("approvals pile up.");
+    y += 6;
     spr.setTextColor(p.text, p.bg);
-    lg("Press A to");
-    lg("approve.");
+    ln("Press A on a prompt");
+    ln("to approve from here.");
+    y += 6;
+    spr.setTextColor(p.textDim, p.bg);
+    ln("18 species. Settings");
+    ln("> ascii pet to cycle.");
 
   } else if (infoPage == 1) {
     _infoHeader(p, y, "BUTTONS", infoPage);
-    spr.setTextColor(p.text, p.bg);    lg("A  front");
-    spr.setTextColor(p.textDim, p.bg); lg("   next / approve");
-    spr.setTextColor(p.text, p.bg);    lg("B  right side");
-    spr.setTextColor(p.textDim, p.bg); lg("   page / deny");
-    spr.setTextColor(p.text, p.bg);    lg("hold A");
-    spr.setTextColor(p.textDim, p.bg); lg("   open menu");
-    spr.setTextColor(p.text, p.bg);    lg("Power  left");
-    spr.setTextColor(p.textDim, p.bg); lg("   6s = power off");
+    spr.setTextColor(p.text, p.bg);    ln("A   front");
+    spr.setTextColor(p.textDim, p.bg); ln("    next screen");
+    ln("    approve prompt"); y += 4;
+    spr.setTextColor(p.text, p.bg);    ln("B   right side");
+    spr.setTextColor(p.textDim, p.bg); ln("    next page");
+    ln("    deny prompt"); y += 4;
+    spr.setTextColor(p.text, p.bg);    ln("hold A");
+    spr.setTextColor(p.textDim, p.bg); ln("    menu"); y += 4;
+    spr.setTextColor(p.text, p.bg);    ln("Power  left side");
+    spr.setTextColor(p.textDim, p.bg); ln("    tap = screen off");
+    ln("    hold 6s = off");
 
   } else if (infoPage == 2) {
     _infoHeader(p, y, "CLAUDE", infoPage);
@@ -834,22 +726,23 @@ void drawInfo() {
   } else {
     _infoHeader(p, y, "CREDITS", infoPage);
     spr.setTextColor(p.textDim, p.bg);
-    lg("made by");
+    ln("made by");
+    y += 4;
     spr.setTextColor(p.text, p.bg);
-    lg("Michael Groberman");
-    y += 6;
+    ln("Michael Groberman");
+    y += 12;
     spr.setTextColor(p.textDim, p.bg);
-    lg("upstream source");
+    ln("source");
+    y += 4;
     spr.setTextColor(p.text, p.bg);
-    lg("anthropics /");
-    lg("claude-desktop-");
-    lg("buddy");
-    y += 6;
+    ln("github.com/anthropics");
+    ln("/claude-desktop-buddy");
+    y += 12;
     spr.setTextColor(p.textDim, p.bg);
-    lg("hardware");
-    spr.setTextColor(p.text, p.bg);
-    lg("M5StickC Plus");
-    lg("ESP32 + AXP192");
+    ln("hardware");
+    y += 4;
+    ln("M5StickC Plus");
+    ln("ESP32 + AXP192");
   }
 }
 
@@ -1036,45 +929,21 @@ static void drawPetStats(const Palette& p) {
     else         spr.drawCircle(px + 4, y + 16, 4, p.textDim);
   }
 
-  // ── BATTERY ─────────────────────────────────────────────────────
-  // Real hardware battery (AXP192), replacing the prior pet "energy" tier.
+  // ── ENERGY METER ────────────────────────────────────────────────
   y = 140;
-  int vBat_mV = (int)(M5.Axp.GetBatVoltage() * 1000);
-  int iBat_mA = (int)M5.Axp.GetBatCurrent();
-  int vBus_mV = (int)(M5.Axp.GetVBusVoltage() * 1000);
-  int pct = (vBat_mV - 3200) / 10;    // (v-3.2)/(4.2-3.2)*100 with mV
-  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
-  bool usb      = vBus_mV > 4000;
-  bool charging = usb && iBat_mA > 1;
-  uint16_t batCol = (pct >= 50) ? 0x07E0 : (pct >= 20) ? 0xFFE0 : HOT;
-
-  spr.setTextSize(1);
   spr.setTextColor(p.textDim, p.bg);
   spr.setCursor(6, y);
-  spr.print("BATTERY");
-  // Mode badge on the right of the label row
-  if (charging) {
-    spr.setTextColor(0xFFE0, p.bg);
-    spr.setCursor(W - 24, y);
-    spr.print("CHG");
-  } else if (usb) {
-    spr.setTextColor(0x05FF, p.bg);
-    spr.setCursor(W - 24, y);
-    spr.print("USB");
+  spr.print("ENERGY");
+  uint8_t en = statsEnergyTier();
+  uint16_t enCol = (en >= 4) ? 0x07E0 : (en >= 2) ? 0xFFE0 : HOT;
+  spr.setTextColor(enCol, p.bg);
+  spr.setCursor(W - 16, y);
+  spr.printf("%u/5", en);
+  for (int i = 0; i < 5; i++) {
+    int px = 6 + i * 25;
+    if (i < en) spr.fillRect(px, y + 12, 22, 10, enCol);
+    else        spr.drawRect(px, y + 12, 22, 10, p.textDim);
   }
-  // Percentage in batt color, slightly right of label
-  spr.setTextColor(batCol, p.bg);
-  spr.setCursor(56, y);
-  spr.printf("%d%%", pct);
-
-  // Battery shell with terminal nub + fill
-  int by = y + 12;
-  int bw = W - 18;     // leave room for the terminal on the right
-  int bh = 12;
-  spr.drawRect(6, by, bw, bh, p.textDim);
-  spr.fillRect(6 + bw, by + 3, 4, bh - 6, p.textDim);  // terminal nub
-  int fill = (pct * (bw - 4)) / 100;
-  if (fill > 0) spr.fillRect(8, by + 2, fill, bh - 4, batCol);
 
   // ── DIVIDER ─────────────────────────────────────────────────────
   y = 170;
@@ -1169,7 +1038,7 @@ void drawPet() {
   if (petPage == 0) drawPetStats(p);
   else drawPetHowTo(p);
 
-  // Header on top of whichever page drew — title only (no page counter).
+  // Header on top of whichever page drew — title left, counter right
   spr.setTextSize(2);
   spr.setTextColor(p.text, p.bg);
   spr.setCursor(4, y + 2);
@@ -1178,6 +1047,9 @@ void drawPet() {
   } else {
     spr.print(petName());
   }
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(W - 28, y + 2);
+  spr.printf("%u/%u", petPage + 1, PET_PAGES);
 }
 
 // WiFi status block (top-right corner). Shows whenever the WiFi

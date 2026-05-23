@@ -69,7 +69,6 @@ void buddySetColor(uint16_t fg)   { _tgt->setTextColor(fg, BUDDY_BG); }
 void buddyPrint(const char* s)    { _tgt->setTextSize(_scale); _tgt->print(s); }
 
 TFT_eSPI* buddyTarget() { return _tgt; }
-uint8_t buddyScale() { return _scale; }
 
 // ──────────────── species registry ────────────────
 // Only gr0m ships in this fork — other species removed.
