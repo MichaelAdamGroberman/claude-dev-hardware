@@ -1,24 +1,70 @@
-# claude-desktop-buddy
+# claude-dev-hardware
 
-Claude for macOS and Windows can connect Claude Cowork and Claude Code to
-maker devices over BLE, so developers and makers can build hardware that
-displays permission prompts, recent messages, and other interactions. We've
-been impressed by the creativity of the maker community around Claude -
-providing a lightweight, opt-in API is our way of making it easier to build
-fun little hardware devices that integrate with Claude.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform: ESP32 / PlatformIO](https://img.shields.io/badge/platform-ESP32%20%2F%20PlatformIO-blue.svg)](https://platformio.org/)
+
+> **This is gr0m's fork of Anthropic's
+> [`claude-desktop-buddy`](https://github.com/anthropics/claude-desktop-buddy)**,
+> licensed MIT (Copyright 2026 Anthropic, PBC — see [LICENSE](LICENSE)). The
+> upstream project is a reference implementation of a BLE desk pet for Claude;
+> this fork keeps that intact and adds networking, a Claude Code bridge, and an
+> MCP control surface (see [What this fork adds](#what-this-fork-adds)).
 
 > **Building your own device?** You don't need any of the code here. See
 > **[REFERENCE.md](REFERENCE.md)** for the wire protocol: Nordic UART
 > Service UUIDs, JSON schemas, and the folder push transport.
 
-As an example, we built a desk pet on ESP32 that lives off permission
-approvals and interaction with Claude. It sleeps when nothing's happening,
-wakes when sessions start, gets visibly impatient when an approval prompt is
-waiting, and lets you approve or deny right from the device.
+Claude for macOS and Windows can connect Claude Cowork and Claude Code to
+maker devices over BLE, so developers and makers can build hardware that
+displays permission prompts, recent messages, and other interactions.
+
+As an example, the upstream project built a desk pet on ESP32 that lives off
+permission approvals and interaction with Claude. It sleeps when nothing's
+happening, wakes when sessions start, gets visibly impatient when an approval
+prompt is waiting, and lets you approve or deny right from the device.
+
+The mascot in this fork is the **gr0m 3D vector robot**: a boxy head cube and
+chest cube rendered through a real 3×3 rotation matrix, with
+accelerometer-driven parallax so the robot appears to turn and look around as
+you tilt the device. A horizontal visor stripe carries the mood channel, and
+the robot moves through the same set of mood states as the original pet (sleep,
+idle, busy, attention, celebrate, dizzy, heart).
 
 <p align="center">
   <img src="docs/device.jpg" alt="M5StickC Plus running the buddy firmware" width="500">
 </p>
+
+<p align="center"><em>📖 Full illustrated manual: <a href="docs/manual.html">docs/manual.html</a></em></p>
+
+## What this fork adds
+
+This fork extends the upstream BLE-only desk pet with networking and a
+control/automation surface. The capabilities below are what's shipped today —
+for setup details see **[tools/cc-bridge/README.md](tools/cc-bridge/README.md)**.
+
+- **WiFi + WireGuard networking.** The BLE stack was migrated from Bluedroid to
+  **NimBLE**, which frees ~30–40 KB of heap so WiFi + WireGuard and BLE can
+  coexist on the M5StickC Plus's single-radio ESP32.
+- **Radio is WiFi _xor_ BLE** (they share the 2.4 GHz radio); **serial is
+  always available** regardless of mode. Switch via the Settings menu or with
+  `{"cmd":"radio","mode":"wifi"|"bt"|"off"}`.
+- **The `tools/cc-bridge` daemon** lets **Claude Code** — both the CLI and the
+  Code feature inside the desktop app — show permission prompts on the device
+  and approve/deny with the physical buttons. It works over four transports:
+  **USB serial, local BLE, WiFi on the same LAN, and WiFi + VPN (WireGuard)**
+  for remote reach. See
+  [tools/cc-bridge/README.md](tools/cc-bridge/README.md) for setup.
+- **The gr0m MCP server** ([`tools/cc-bridge/gr0m_mcp.py`](tools/cc-bridge/gr0m_mcp.py))
+  exposes the device to Claude as MCP tools: status, on-screen notify, radio
+  mode, owner name, token usage / reporting period / reset, **GPIO
+  read/write/mode, ADC read, and a single-channel logic-analyzer capture**, plus
+  **adapter mode** — which turns the device into a dedicated GPIO probe.
+- **Token-usage reporting on the device.** The daemon computes output-token
+  usage over a configurable window (day / week / month / all) from your Claude
+  Code transcripts and pushes it to the device for display.
+
+> **Roadmap:** see [docs/superpowers/specs/](docs/superpowers/specs/) for design
+> notes on not-yet-implemented features.
 
 ## Hardware
 
@@ -37,7 +83,13 @@ then:
 pio run -t upload
 ```
 
-If you're starting from a previously-flashed device, wipe it first:
+The build uses **NimBLE** (`h2zero/NimBLE-Arduino`) instead of the default
+Bluedroid stack — it's already declared in `platformio.ini`, so PlatformIO
+pulls it on first build along with the WireGuard-ESP32 dependency. No extra
+setup is needed.
+
+If you're starting from a previously-flashed device, wipe it first to clear
+stale NVS:
 
 ```bash
 pio run -t erase && pio run -t upload
@@ -64,7 +116,8 @@ Once paired, the bridge auto-reconnects whenever both sides are awake.
 If discovery isn't finding the stick:
 
 - Make sure it's awake (any button press)
-- Check the stick's settings menu → bluetooth is on
+- Check the stick's settings menu → bluetooth is on (remember: the radio is
+  WiFi **xor** BLE — if it's in WiFi mode, BLE discovery won't see it)
 
 ## Controls
 
@@ -83,16 +136,17 @@ approval prompt is up). Any button press wakes it.
 
 ## ASCII pets
 
-Eighteen pets, each with seven animations (sleep, idle, busy, attention,
-celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
-Choice persists to NVS.
+In addition to the gr0m vector robot, the firmware ships the upstream set of
+ASCII pets, each with seven animations (sleep, idle, busy, attention,
+celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter. Choice
+persists to NVS.
 
 ## GIF pets
 
-If you want a custom GIF character instead of an ASCII buddy, drag a
+If you want a custom GIF character instead of a built-in buddy, drag a
 character pack folder onto the drop target in the Hardware Buddy window. The
 app streams it over BLE and the stick switches to GIF mode live. **Settings
-→ delete char** reverts to ASCII mode.
+→ delete char** reverts to the built-in mode.
 
 A character pack is a folder with `manifest.json` and 96px-wide GIFs:
 
@@ -155,14 +209,15 @@ If you're iterating on a character and would rather skip the BLE round-trip,
 src/
   main.cpp       — loop, state machine, UI screens
   buddy.cpp      — ASCII species dispatch + render helpers
-  buddies/       — one file per species, seven anim functions each
-  ble_bridge.cpp — Nordic UART service, line-buffered TX/RX
+  buddies/       — one file per species (incl. gr0m), seven anim functions each
+  ble_bridge.cpp — Nordic UART service (NimBLE), line-buffered TX/RX
+  net_wifi.cpp   — WiFi + WireGuard transport, TCP listener / dial-out
   character.cpp  — GIF decode + render
   data.h         — wire protocol, JSON parse
   xfer.h         — folder push receiver
   stats.h        — NVS-backed stats, settings, owner, species choice
 characters/      — example GIF character packs
-tools/           — generators and converters
+tools/           — generators, converters, and the cc-bridge daemon + MCP server
 ```
 
 ## Availability
@@ -170,3 +225,8 @@ tools/           — generators and converters
 The BLE API is only available when the desktop apps are in developer mode
 (**Help → Troubleshooting → Enable Developer Mode**). It's intended for
 makers and developers and isn't an officially supported product feature.
+
+## Security
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md) for how to report it
+privately.
