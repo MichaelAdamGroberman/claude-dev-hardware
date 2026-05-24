@@ -1499,6 +1499,27 @@ void setup() {
   Serial.printf("buddy: %s\n", buddyMode ? "ASCII mode" : "GIF character loaded");
 }
 
+// Adapter mode — runtime-only (a reset clears it, returning to BT/WiFi pet
+// mode). Strips the desk-pet rendering + mic so the device is a focused
+// GPIO/logic probe; the command transports keep running.
+bool adapterMode = false;
+static void adapterTick(uint32_t now) {
+  static uint32_t last = 0;
+  if (now - last < 500) return;              // light: ~2 Hz redraw
+  last = now;
+  spr.fillSprite(TFT_BLACK);
+  spr.setTextColor(TFT_GREEN, TFT_BLACK);
+  spr.setTextSize(2); spr.setCursor(8, 24); spr.print("ADAPTER");
+  spr.setTextSize(1); spr.setTextColor(TFT_WHITE, TFT_BLACK);
+  spr.setCursor(8, 54); spr.print("GPIO / logic probe");
+  spr.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  spr.setCursor(8, 74); spr.print("pins 0 25 26");
+  spr.setCursor(8, 86); spr.print("     32 33 36");
+  spr.setTextColor(0x07FF, TFT_BLACK);
+  spr.setCursor(8, 112); spr.print("reset = exit");
+  spr.pushSprite(0, 0);
+}
+
 void loop() {
   M5.update();
   M5.Beep.update();
@@ -1574,6 +1595,11 @@ void loop() {
   static bool _tcpStarted = false;
   if (!_tcpStarted && netWifiOnline()) { _tcpStarted = true; netTcpInit(); }
   if (_tcpStarted) netTcpTick();
+
+  // Adapter mode: device is a focused GPIO/logic probe — commands were just
+  // serviced above (dataPoll + transports); skip the pet animation, mic, and
+  // normal UI. A reset clears adapterMode and returns to BT/WiFi pet mode.
+  if (adapterMode) { adapterTick(now); return; }
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;

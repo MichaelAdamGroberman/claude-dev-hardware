@@ -46,6 +46,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}}, "required": ["pin"]}},
     {"name": "gr0m_logic_capture", "description": "Mini logic-analyzer: sample one pin at a fixed interval and return the bit trace (hex) plus the actual elapsed time. Up to 512 samples.",
      "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}, "samples": {"type": "integer"}, "interval_us": {"type": "integer"}}, "required": ["pin"]}},
+    {"name": "gr0m_adapter", "description": "Toggle adapter mode: strip the desk-pet UI/mic so the device is a dedicated GPIO/logic probe. In-memory only — a device reset returns it to normal BT/WiFi pet mode.",
+     "inputSchema": {"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]}},
 ]
 
 
@@ -107,6 +109,12 @@ def _call_tool(name: str, args: dict) -> str:
             "cmd": {"cmd": "gpio", "act": "cap", "pin": int(args.get("pin", -1)),
                     "n": int(args.get("samples", 128)), "us": int(args.get("interval_us", 50))}},
             timeout=15))
+    if name == "gr0m_adapter":
+        on = bool(args.get("on", True))
+        r = _daemon({"op": "send", "cmd": {"cmd": "adapter", "on": on}})
+        if r.get("ok"):
+            return "adapter mode ON — reset the device to return to BT/WiFi" if on else "adapter mode OFF"
+        return json.dumps(r)
     return f"unknown tool: {name}"
 
 

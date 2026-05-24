@@ -207,6 +207,19 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  // Adapter mode — strip the desk-pet (skip animation + mic, quiet BLE
+  // advertising) so the device is a focused GPIO / logic-analyzer probe.
+  // In-memory only: a reset returns to normal BT/WiFi pet mode.
+  //   {"cmd":"adapter","on":true|false}
+  if (strcmp(cmd, "adapter") == 0) {
+    extern bool adapterMode;
+    bool on = (doc["on"] | true);
+    adapterMode = on;
+    if (on) bleAdvertisingStop(); else bleAdvertisingStart();
+    _xAck("adapter", on);
+    return true;
+  }
+
   // GPIO / mini logic-analyzer on the exposed header pins. Restricted to
   // pins that aren't wired to the display/IMU/buttons/IR/mic so we can't
   // brick the device. Replies with {"ack":"gpio",...} carrying the result.

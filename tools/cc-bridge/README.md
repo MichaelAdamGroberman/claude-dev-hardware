@@ -142,6 +142,7 @@ Tools:
 | `gr0m_gpio_mode` | `pin`, `mode` = `input`\|`output`\|`pullup` | set pin mode |
 | `gr0m_adc_read` | `pin` | analog read → raw (0-4095) + mV |
 | `gr0m_logic_capture` | `pin`, `samples`, `interval_us` | mini logic-analyzer trace |
+| `gr0m_adapter` | `on` = `true`\|`false` | adapter mode: dedicate the device to GPIO probing |
 
 ### GPIO / logic analyzer
 
@@ -153,6 +154,12 @@ exposed pins that aren't wired to the display/IMU/buttons/IR/mic — **0, 25,
 26, 32, 33, 36** (36 is input-only; ADC-capable: 32, 33, 36) — so a probe
 can't brick the device. Firmware command: `{"cmd":"gpio","act":...}`; the
 daemon's `op:query` waits for the `{"ack":"gpio",...}` reply and returns it.
+
+**Adapter mode** (`gr0m_adapter`) turns the buddy into a dedicated probe: it
+stops the pet animation + mic and quiets BLE advertising so the device is
+focused on GPIO/logic work, while the command transports keep running. It's
+**in-memory only — a device reset returns it to normal BT/WiFi pet mode**
+(or call `gr0m_adapter(false)`).
 
 ### Token usage reporting
 
