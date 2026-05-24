@@ -215,7 +215,11 @@ inline bool xferCommand(JsonDocument& doc) {
     extern bool adapterMode;
     bool on = (doc["on"] | true);
     adapterMode = on;
-    if (on) bleAdvertisingStop(); else bleAdvertisingStart();
+    // Only quiet BLE if it isn't the active command link — if a BLE client
+    // is connected, leave advertising up so the channel (and reconnects)
+    // keep working. Serial/WiFi links are unaffected either way.
+    if (on) { if (!bleConnected()) bleAdvertisingStop(); }
+    else bleAdvertisingStart();
     _xAck("adapter", on);
     return true;
   }
