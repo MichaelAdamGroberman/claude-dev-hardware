@@ -207,6 +207,62 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  // GPIO / mini logic-analyzer on the exposed header pins. Restricted to
+  // pins that aren't wired to the display/IMU/buttons/IR/mic so we can't
+  // brick the device. Replies with {"ack":"gpio",...} carrying the result.
+  //   {"cmd":"gpio","act":"read"|"write"|"mode"|"adc"|"cap","pin":N,...}
+  //   write: "value":0|1   mode: "mode":"input"|"output"|"pullup"
+  //   adc:   analog read    cap: "n":<=512 samples, "us":interval -> "bits" hex
+  if (strcmp(cmd, "gpio") == 0) {
+    static const int SAFE[] = {0, 25, 26, 32, 33, 36};
+    const char* act = doc["act"] | "read";
+    int pin = doc["pin"] | -1;
+    bool safe = false;
+    for (unsigned k = 0; k < sizeof(SAFE)/sizeof(SAFE[0]); k++) if (SAFE[k] == pin) safe = true;
+    char b[640];
+    int len;
+    if (!safe) {
+      len = snprintf(b, sizeof(b),
+        "{\"ack\":\"gpio\",\"ok\":false,\"pin\":%d,\"error\":\"pin not allowed; use 0,25,26,32,33,36\"}\n", pin);
+    } else if (strcmp(act, "mode") == 0) {
+      const char* m = doc["mode"] | "input";
+      pinMode(pin, strcmp(m,"output")==0 ? OUTPUT : strcmp(m,"pullup")==0 ? INPUT_PULLUP : INPUT);
+      len = snprintf(b, sizeof(b), "{\"ack\":\"gpio\",\"ok\":true,\"act\":\"mode\",\"pin\":%d,\"mode\":\"%s\"}\n", pin, m);
+    } else if (strcmp(act, "write") == 0) {
+      int v = (doc["value"] | 0) ? 1 : 0;
+      pinMode(pin, OUTPUT); digitalWrite(pin, v);
+      len = snprintf(b, sizeof(b), "{\"ack\":\"gpio\",\"ok\":true,\"act\":\"write\",\"pin\":%d,\"value\":%d}\n", pin, v);
+    } else if (strcmp(act, "adc") == 0) {
+      int v = analogRead(pin);
+      len = snprintf(b, sizeof(b), "{\"ack\":\"gpio\",\"ok\":true,\"act\":\"adc\",\"pin\":%d,\"raw\":%d,\"mv\":%d}\n",
+                     pin, v, (int)((long)v * 3300 / 4095));
+    } else if (strcmp(act, "cap") == 0) {
+      int n = doc["n"] | 128; if (n > 512) n = 512; if (n < 1) n = 1;
+      int iv = doc["us"] | 50; if (iv < 2) iv = 2;
+      if ((long)n * iv > 400000) n = 400000 / iv;   // cap the blocking window ~0.4s
+      pinMode(pin, INPUT);
+      uint8_t bits[64]; memset(bits, 0, sizeof(bits));
+      uint32_t t0 = micros();
+      for (int i = 0; i < n; i++) {
+        uint32_t due = t0 + (uint32_t)i * iv;
+        while ((int32_t)(micros() - due) < 0) {}
+        if (digitalRead(pin)) bits[i >> 3] |= (1 << (i & 7));
+      }
+      uint32_t el = micros() - t0;
+      int nb = (n + 7) / 8; char hex[130];
+      for (int i = 0; i < nb; i++) snprintf(hex + i*2, 3, "%02x", bits[i]);
+      len = snprintf(b, sizeof(b),
+        "{\"ack\":\"gpio\",\"ok\":true,\"act\":\"cap\",\"pin\":%d,\"n\":%d,\"us\":%d,\"elapsed_us\":%lu,\"bits\":\"%s\"}\n",
+        pin, n, iv, (unsigned long)el, hex);
+    } else {
+      pinMode(pin, INPUT); int v = digitalRead(pin);
+      len = snprintf(b, sizeof(b), "{\"ack\":\"gpio\",\"ok\":true,\"act\":\"read\",\"pin\":%d,\"value\":%d}\n", pin, v);
+    }
+    Serial.write(b, len);
+    bleWrite((const uint8_t*)b, len);
+    return true;
+  }
+
   if (strcmp(cmd, "status") == 0) {
     // Dump everything the info screens show. Manual printf rather than
     // ArduinoJson serialize — less heap churn, and the shape is fixed.

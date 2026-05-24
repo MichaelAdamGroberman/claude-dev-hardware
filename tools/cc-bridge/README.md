@@ -9,7 +9,7 @@ Three pieces:
 |---|---|
 | `buddy_bridged.py` | Long-running daemon. Holds one link to the device (serial / BLE / WiFi), exposes a Unix socket at `~/.cache/claude-buddy/buddy.sock` for local clients. |
 | `buddy_prompt.py` | One-shot PreToolUse hook. Reads the tool call from stdin, asks the daemon, prints `{"decision":"approve"}` or `{"decision":"block",…}` back to Claude Code. |
-| `gr0m_mcp.py` | MCP server (stdio). Lets Claude **control/query** the device — status, on-screen notify, radio mode, owner, and token usage — via tools. Thin client of the daemon socket. See [gr0m MCP server](#gr0m-mcp-server). |
+| `gr0m_mcp.py` | MCP server (stdio). Lets Claude **control/query** the device — status, notify, radio mode, owner, token usage, and **GPIO / logic-analyzer** — via tools. Thin client of the daemon socket. See [gr0m MCP server](#gr0m-mcp-server). |
 
 ## Install
 
@@ -137,6 +137,22 @@ Tools:
 | `gr0m_set_owner` | `name` | set the on-screen owner name |
 | `gr0m_token_reset` | — | zero the token-usage counter |
 | `gr0m_token_period` | `period` = `day`\|`week`\|`month`\|`all` | set the usage reporting window |
+| `gr0m_gpio_read` | `pin` | digital read |
+| `gr0m_gpio_write` | `pin`, `value` | drive a pin high/low |
+| `gr0m_gpio_mode` | `pin`, `mode` = `input`\|`output`\|`pullup` | set pin mode |
+| `gr0m_adc_read` | `pin` | analog read → raw (0-4095) + mV |
+| `gr0m_logic_capture` | `pin`, `samples`, `interval_us` | mini logic-analyzer trace |
+
+### GPIO / logic analyzer
+
+The device exposes its header pins as a probe over MCP — read/write/mode,
+analog read, and a single-channel **logic-analyzer capture** (sample one pin
+at a fixed interval, up to 512 samples, returned as a hex bit-trace with the
+actual elapsed time so you can derive the real rate). Restricted to the
+exposed pins that aren't wired to the display/IMU/buttons/IR/mic — **0, 25,
+26, 32, 33, 36** (36 is input-only; ADC-capable: 32, 33, 36) — so a probe
+can't brick the device. Firmware command: `{"cmd":"gpio","act":...}`; the
+daemon's `op:query` waits for the `{"ack":"gpio",...}` reply and returns it.
 
 ### Token usage reporting
 

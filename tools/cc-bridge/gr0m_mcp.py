@@ -36,6 +36,16 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "gr0m_token_period", "description": "Set the token-usage reporting window shown on the device.",
      "inputSchema": {"type": "object", "properties": {"period": {"type": "string", "enum": ["day", "week", "month", "all"]}}, "required": ["period"]}},
+    {"name": "gr0m_gpio_read", "description": "Read a digital GPIO pin. Allowed pins: 0, 25, 26, 32, 33, 36.",
+     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}}, "required": ["pin"]}},
+    {"name": "gr0m_gpio_write", "description": "Drive a GPIO pin high/low (sets it to OUTPUT). Allowed pins: 0, 25, 26, 32, 33.",
+     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}, "value": {"type": "integer", "enum": [0, 1]}}, "required": ["pin", "value"]}},
+    {"name": "gr0m_gpio_mode", "description": "Set a pin's mode before reading/writing.",
+     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}, "mode": {"type": "string", "enum": ["input", "output", "pullup"]}}, "required": ["pin", "mode"]}},
+    {"name": "gr0m_adc_read", "description": "Analog read a pin, returns raw (0-4095) and millivolts. ADC-capable pins: 32, 33, 36.",
+     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}}, "required": ["pin"]}},
+    {"name": "gr0m_logic_capture", "description": "Mini logic-analyzer: sample one pin at a fixed interval and return the bit trace (hex) plus the actual elapsed time. Up to 512 samples.",
+     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}, "samples": {"type": "integer"}, "interval_us": {"type": "integer"}}, "required": ["pin"]}},
 ]
 
 
@@ -78,6 +88,25 @@ def _call_tool(name: str, args: dict) -> str:
         return json.dumps(_daemon({"op": "token", "action": "reset"}))
     if name == "gr0m_token_period":
         return json.dumps(_daemon({"op": "token", "action": "period", "value": args.get("period", "day")}))
+    if name == "gr0m_gpio_read":
+        return json.dumps(_daemon({"op": "query", "ack": "gpio",
+            "cmd": {"cmd": "gpio", "act": "read", "pin": int(args.get("pin", -1))}}))
+    if name == "gr0m_gpio_write":
+        return json.dumps(_daemon({"op": "query", "ack": "gpio",
+            "cmd": {"cmd": "gpio", "act": "write", "pin": int(args.get("pin", -1)),
+                    "value": int(args.get("value", 0))}}))
+    if name == "gr0m_gpio_mode":
+        return json.dumps(_daemon({"op": "query", "ack": "gpio",
+            "cmd": {"cmd": "gpio", "act": "mode", "pin": int(args.get("pin", -1)),
+                    "mode": args.get("mode", "input")}}))
+    if name == "gr0m_adc_read":
+        return json.dumps(_daemon({"op": "query", "ack": "gpio",
+            "cmd": {"cmd": "gpio", "act": "adc", "pin": int(args.get("pin", -1))}}))
+    if name == "gr0m_logic_capture":
+        return json.dumps(_daemon({"op": "query", "ack": "gpio", "timeout": 12,
+            "cmd": {"cmd": "gpio", "act": "cap", "pin": int(args.get("pin", -1)),
+                    "n": int(args.get("samples", 128)), "us": int(args.get("interval_us", 50))}},
+            timeout=15))
     return f"unknown tool: {name}"
 
 

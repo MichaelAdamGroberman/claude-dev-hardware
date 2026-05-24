@@ -73,6 +73,7 @@ def _period_start(period: str) -> float:
 class BuddyLink:
     def __init__(self) -> None:
         self.pending: dict[str, asyncio.Future[str]] = {}
+        self._ack_waiters: dict[str, asyncio.Future] = {}  # ack-type -> future
         self._rx_buf = bytearray()
         self._owner = os.environ.get("BUDDY_OWNER", "CLI")
 
@@ -237,7 +238,27 @@ class BuddyLink:
             await self._send_json({"ack": "status", "ok": True,
                                    "data": {"name": "claude-code-bridge", "sec": False}})
             return
-        # acks / auth lines: ignore
+        ack = msg.get("ack")
+        if ack:
+            fut = self._ack_waiters.pop(ack, None)
+            if fut and not fut.done():
+                fut.set_result(msg)
+            return
+        # other lines: ignore
+
+    async def query(self, cmd: dict, ack: str, timeout: float = 8.0) -> dict:
+        """Send a command and wait for the device's {"ack": <ack>} reply
+        (used for GPIO reads / captures that return data)."""
+        if not self.is_connected():
+            return {"error": "device not connected"}
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._ack_waiters[ack] = fut
+        await self._send_json(cmd)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._ack_waiters.pop(ack, None)
+            return {"error": "device timeout"}
 
     # ── BLE ──────────────────────────────────────────────────────────
 
@@ -436,6 +457,13 @@ async def handle_client(link: BuddyLink, reader, writer) -> None:
             if ok:
                 await link._send_json(cmd)
             writer.write((json.dumps({"ok": ok}) + "\n").encode())
+        elif op == "query":
+            cmd = req.get("cmd"); ack = str(req.get("ack", ""))
+            if isinstance(cmd, dict) and ack:
+                r = await link.query(cmd, ack, float(req.get("timeout", 8)))
+            else:
+                r = {"error": "query needs cmd + ack"}
+            writer.write((json.dumps(r) + "\n").encode())
         elif op == "token":
             action = req.get("action")
             if action == "reset":
