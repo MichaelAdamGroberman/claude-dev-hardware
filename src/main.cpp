@@ -148,8 +148,9 @@ const uint8_t MENU_N = 6;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
-const char* settingsItems[] = { "brightness", "sound", "bluetooth", "wifi", "led", "mic claps", "transcript", "clock rot", "ascii pet", "reset", "back" };
-const uint8_t SETTINGS_N = 11;
+const char* settingsItems[] = { "brightness", "sound", "bluetooth", "wifi", "led", "mic claps", "transcript", "clock rot", "ascii pet", "adapter", "reset", "back" };
+const uint8_t SETTINGS_N = 12;
+extern bool adapterMode;   // defined near loop(); the "adapter" item toggles it
 
 bool    resetOpen = false;
 uint8_t resetSel  = 0;
@@ -193,8 +194,13 @@ static void applySetting(uint8_t idx) {
     case 6: s.hud = !s.hud; break;
     case 7: s.clockRot = (s.clockRot + 1) % 3; break;
     case 8: nextPet(); return;
-    case 9: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 10: settingsOpen = false; characterInvalidate(); return;
+    case 9:  // adapter (GPIO/logic-probe) mode — runtime; BtnB or reset exits
+      adapterMode = true;
+      if (!bleConnected()) bleAdvertisingStop();
+      settingsOpen = false;
+      return;
+    case 10: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
+    case 11: settingsOpen = false; characterInvalidate(); return;
   }
   settingsSave();
 }
@@ -1504,6 +1510,13 @@ void setup() {
 // GPIO/logic probe; the command transports keep running.
 bool adapterMode = false;
 static void adapterTick(uint32_t now) {
+  // On-device exit: BtnB (the top button) leaves adapter mode without a
+  // reset, resuming BLE advertising. A reset also returns to pet mode.
+  if (M5.BtnB.wasPressed()) {
+    adapterMode = false;
+    bleAdvertisingStart();
+    return;
+  }
   static uint32_t last = 0;
   if (now - last < 500) return;              // light: ~2 Hz redraw
   last = now;
@@ -1516,7 +1529,7 @@ static void adapterTick(uint32_t now) {
   spr.setCursor(8, 74); spr.print("pins 0 25 26");
   spr.setCursor(8, 86); spr.print("     32 33 36");
   spr.setTextColor(0x07FF, TFT_BLACK);
-  spr.setCursor(8, 112); spr.print("reset = exit");
+  spr.setCursor(8, 110); spr.print("BtnB or reset: exit");
   spr.pushSprite(0, 0);
 }
 

@@ -159,7 +159,8 @@ daemon's `op:query` waits for the `{"ack":"gpio",...}` reply and returns it.
 stops the pet animation + mic and quiets BLE advertising so the device is
 focused on GPIO/logic work, while the command transports keep running. It's
 **in-memory only — a device reset returns it to normal BT/WiFi pet mode**
-(or call `gr0m_adapter(false)`).
+(or call `gr0m_adapter(false)`). It can also be toggled **on the device**:
+Settings → `adapter` to enter, **BtnB** (or a reset) to exit.
 
 ### Token usage reporting
 
