@@ -112,8 +112,10 @@ static void _outTick() {
     _outAuthed = false;
     uint32_t now = millis();
     if (now < _outNextTry) return;
-    _outNextTry = now + 5000;          // retry every 5s while down
-    if (_out.connect(_peerHost, _peerPort)) {
+    _outNextTry = now + 20000;         // retry every 20s while down
+    // Short connect timeout: connect() is blocking, so a dead/unreachable
+    // peer (e.g. tunnel down) must not stall the render loop for seconds.
+    if (_out.connect(_peerHost, _peerPort, 1200)) {
       _out.setNoDelay(true);
       _out.printf("%s\n", _token);     // authenticate ourselves to the bridge
       _outAuthed = true;
