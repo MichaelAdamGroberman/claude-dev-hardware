@@ -43,6 +43,8 @@ NUS_TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # device → client notify
 SOCK_DIR  = Path.home() / ".cache" / "claude-buddy"
 SOCK_PATH = SOCK_DIR / "buddy.sock"
 LOG_PATH  = SOCK_DIR / "buddy.log"
+# Claude Code session transcripts — read for live token usage.
+PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 HEARTBEAT_S = 10
 DEFAULT_PROMPT_TIMEOUT_S = 30
@@ -65,6 +67,12 @@ class BuddyLink:
         self.pending: dict[str, asyncio.Future[str]] = {}
         self._rx_buf = bytearray()
         self._owner = os.environ.get("BUDDY_OWNER", "CLI")
+
+        # Live token usage, read incrementally from the most-recently-active
+        # Claude Code transcript so the device's counter tracks real usage.
+        self._tok_path: Optional[str] = None
+        self._tok_off = 0
+        self._tok_total = 0
 
         # Transport selection:
         #   BUDDY_LISTEN set → wait for the device to dial in (VPN/off-LAN).
@@ -104,6 +112,44 @@ class BuddyLink:
         if self.transport == "tcp-listen":
             return self.is_connected()   # passive — the listener fills the link
         return await self._ble_connect()
+
+    def _session_tokens(self) -> int:
+        """Cumulative output tokens from the most-recently-active transcript.
+        Read incrementally (only new bytes since last call) so it's cheap to
+        poll. Resets the running total when the active session changes."""
+        try:
+            files = list(PROJECTS_DIR.glob("*/*.jsonl"))
+            if not files:
+                return self._tok_total
+            latest = max(files, key=lambda p: p.stat().st_mtime)
+            if str(latest) != self._tok_path:
+                self._tok_path = str(latest)
+                self._tok_off = 0
+                self._tok_total = 0
+            with latest.open("rb") as f:
+                f.seek(self._tok_off)
+                data = f.read()
+                end = f.tell()
+            # Don't consume a half-written trailing line.
+            if data and not data.endswith(b"\n"):
+                nl = data.rfind(b"\n")
+                if nl < 0:
+                    return self._tok_total          # no complete line yet
+                end = self._tok_off + nl + 1
+                data = data[: nl + 1]
+            self._tok_off = end
+            for line in data.split(b"\n"):
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                usage = (obj.get("message") or {}).get("usage") or {}
+                self._tok_total += int(usage.get("output_tokens", 0) or 0)
+            return self._tok_total
+        except Exception:
+            return self._tok_total
 
     async def _send_initial(self) -> None:
         now = int(time.time())
@@ -268,9 +314,10 @@ class BuddyLink:
         pid = f"hook_{uuid.uuid4().hex[:10]}"
         fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
         self.pending[pid] = fut
+        tok = self._session_tokens()
         await self._send_json({
             "total": 1, "running": 0, "waiting": 1,
-            "msg": f"approve: {tool}", "tokens": 0, "tokens_today": 0,
+            "msg": f"approve: {tool}", "tokens": tok, "tokens_today": tok,
             "prompt": {"id": pid, "tool": tool, "hint": hint, "src": src},
         })
         log(f"→ device prompt {pid}: {tool} / {hint!r}")
@@ -285,7 +332,9 @@ class BuddyLink:
         while True:
             await asyncio.sleep(HEARTBEAT_S)
             if self.is_connected() and not self.pending:
-                await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
+                tok = self._session_tokens()
+                await self._send_json({"total": 0, "running": 0, "waiting": 0,
+                                       "msg": "", "tokens": tok, "tokens_today": tok})
 
     async def disconnect(self) -> None:
         if self.transport == "tcp":

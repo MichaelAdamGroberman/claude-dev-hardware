@@ -3,6 +3,7 @@
 #include <WireGuard-ESP32.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -23,6 +24,11 @@ static uint16_t _peerPort  = 51820;
 // event callback, so we re-check WireGuard.is_initialized() periodically.
 static uint32_t _nextPollMs = 0;
 static const uint32_t POLL_INTERVAL_MS = 1500;
+// Self-keepalive: the ciniml lib ignores PersistentKeepalive, so we nudge
+// the tunnel ourselves to keep the gateway's session from expiring.
+static WiFiUDP _ka;
+static uint32_t _kaNextMs = 0;
+static const uint32_t KA_INTERVAL_MS = 15000;
 
 static void loadNvs() {
   Preferences p;
@@ -83,6 +89,23 @@ void netWgStop() {
 void netWgTick() {
   if (_state == WG_OFF || _state == WG_FAILED) return;
   uint32_t now = millis();
+
+  // Keepalive — route a tiny packet at the gateway's tunnel IP (.1 of our
+  // /24) so the WG lib (re)handshakes and the gateway keeps the session
+  // alive. Without this the tunnel goes stale after a few idle minutes and
+  // device→tailnet stops forwarding.
+  if (now >= _kaNextMs) {
+    _kaNextMs = now + KA_INTERVAL_MS;
+    IPAddress me;
+    if (me.fromString(_ifAddr)) {
+      IPAddress gw(me[0], me[1], me[2], 1);
+      uint8_t b = 0;
+      _ka.beginPacket(gw, 51820);
+      _ka.write(&b, 1);
+      _ka.endPacket();
+    }
+  }
+
   if (now < _nextPollMs) return;
   _nextPollMs = now + POLL_INTERVAL_MS;
   // is_initialized() returns true after the first successful handshake.
