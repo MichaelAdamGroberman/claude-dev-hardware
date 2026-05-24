@@ -269,3 +269,12 @@ inline void speciesIdxSave(uint8_t idx) {
 inline Settings& settings() { return _settings; }
 
 inline const Stats& stats() { return _stats; }
+
+// Set the displayed token counter directly (in-memory only — NOT persisted,
+// so no NVS wear from frequent updates). The bridge daemon drives this with
+// per-period usage (day/week/month) and can zero it on reset. Level follows
+// so the chest bolt / stats screen stay consistent.
+inline void statsSetTokens(uint32_t t) {
+  _stats.tokens = t;
+  _stats.level  = t / TOKENS_PER_LEVEL;
+}

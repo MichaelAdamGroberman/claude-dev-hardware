@@ -179,6 +179,14 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  // Set the displayed token counter (period usage / reset), driven by the
+  // bridge daemon. {"cmd":"tokens","set":N}
+  if (strcmp(cmd, "tokens") == 0) {
+    if (doc["set"].is<uint32_t>()) statsSetTokens(doc["set"].as<uint32_t>());
+    _xAck("tokens", true);
+    return true;
+  }
+
   // Switch radio mode. WiFi and BLE are mutually exclusive (shared radio);
   // serial always works regardless. {"cmd":"radio","mode":"wifi"|"bt"|"off"}
   // writes the settings and reboots into the chosen mode.

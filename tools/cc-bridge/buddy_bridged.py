@@ -1,29 +1,23 @@
 #!/usr/bin/env python3
 """
-buddy-bridged — bridge from Claude Code / the `claude` CLI (or any local
-hook) to the Hardware Buddy firmware. Speaks the Nordic-UART JSON protocol
-over either transport:
+buddy-bridged — bridge from Claude Code / the `claude` CLI / the gr0m MCP
+server to the Hardware Buddy firmware. Speaks the Nordic-UART JSON protocol
+over one of four transports, chosen by environment:
 
-  • BLE   (default)            — local Bluetooth, scans for "Claude*".
-  • TCP   (BUDDY_HOST set)     — WiFi / WireGuard. Connects to the device's
-                                 token-gated listener at host:port (6400).
+  BUDDY_SERIAL "/dev/cu.usbserial-XXXX"  → USB serial (reliable, no pairing)
+  BUDDY_LISTEN "0.0.0.0:6401"            → device dials in (WiFi+VPN)
+  BUDDY_HOST   "10.0.0.33:6400"          → dial the device (WiFi LAN)
+  (none)                                 → BLE (scans for Claude*)
+  BUDDY_TOKEN  shared token for the TCP transports
+  BUDDY_OWNER  on-screen name ("CLI")
+  BUDDY_TOKEN_PERIOD  day|week|month|all (default day) — token usage window
 
-Transport is chosen by environment:
-  BUDDY_HOST   "10.0.0.33:6400" (LAN) or "10.20.30.5:6400" (over the VPN)
-               → use TCP. Unset → use BLE.
-  BUDDY_TOKEN  shared token the device requires for TCP (see provisioning).
-  BUDDY_OWNER  name shown on the device ("CLI" by default).
-
-Exposes a Unix socket at ~/.cache/claude-buddy/buddy.sock for local
-clients (the buddy-prompt PreToolUse hook). One JSON line per request,
-one per response — unchanged across transports.
-
-Request: {"op":"prompt","tool":"Bash","hint":"git push","src":"cli","timeout":30}
-Reply:   {"decision":"once"|"deny"|"timeout"|"disconnected"}
-Request: {"op":"status"}
-Reply:   {"connected":true/false,"device":"Claude-XXXX"|"tcp:host:port"}
-
-Requires:  pip install bleak   (only needed for the BLE transport)
+Unix socket ~/.cache/claude-buddy/buddy.sock, one JSON line per req/resp:
+  {"op":"prompt","tool":..,"hint":..,"src":..,"timeout":..} -> {"decision":..}
+  {"op":"status"}                 -> {connected, device, tokens, period}
+  {"op":"send","cmd":{...}}       -> forward a raw command to the device
+  {"op":"token","action":"reset"} -> zero the usage counter
+  {"op":"token","action":"period","value":"day|week|month|all"}
 """
 from __future__ import annotations
 
@@ -34,16 +28,17 @@ import signal
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-NUS_RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # client → device write
-NUS_TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # device → client notify
+NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
-SOCK_DIR  = Path.home() / ".cache" / "claude-buddy"
-SOCK_PATH = SOCK_DIR / "buddy.sock"
-LOG_PATH  = SOCK_DIR / "buddy.log"
-# Claude Code session transcripts — read for live token usage.
+SOCK_DIR   = Path.home() / ".cache" / "claude-buddy"
+SOCK_PATH  = SOCK_DIR / "buddy.sock"
+LOG_PATH   = SOCK_DIR / "buddy.log"
+STATE_PATH = SOCK_DIR / "token_state.json"
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 HEARTBEAT_S = 10
@@ -60,46 +55,127 @@ def log(msg: str) -> None:
         pass
 
 
-class BuddyLink:
-    """Holds the device link (BLE or TCP) and the prompt state machine."""
+def _period_start(period: str) -> float:
+    """Epoch (UTC) for the start of the reporting window."""
+    now = datetime.now(timezone.utc)
+    if period == "all":
+        return 0.0
+    if period == "week":
+        return (now.timestamp()) - 7 * 86400
+    if period == "month":
+        return (now.timestamp()) - 30 * 86400
+    # day = since local midnight
+    local = datetime.now()
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight.timestamp()
 
+
+class BuddyLink:
     def __init__(self) -> None:
         self.pending: dict[str, asyncio.Future[str]] = {}
         self._rx_buf = bytearray()
         self._owner = os.environ.get("BUDDY_OWNER", "CLI")
 
-        # Live token usage, read incrementally from the most-recently-active
-        # Claude Code transcript so the device's counter tracks real usage.
-        self._tok_path: Optional[str] = None
-        self._tok_off = 0
-        self._tok_total = 0
-
-        # Transport selection:
-        #   BUDDY_LISTEN set → wait for the device to dial in (VPN/off-LAN).
-        #   BUDDY_HOST set   → dial the device's listener (LAN).
-        #   neither          → BLE.
+        self._serial_port = os.environ.get("BUDDY_SERIAL", "").strip()
         self._host   = os.environ.get("BUDDY_HOST", "").strip()
         self._listen = os.environ.get("BUDDY_LISTEN", "").strip()
         self._token  = os.environ.get("BUDDY_TOKEN", "").strip()
-        self.transport = ("tcp-listen" if self._listen
+        self.transport = ("serial" if self._serial_port
+                          else "tcp-listen" if self._listen
                           else "tcp" if self._host else "ble")
 
-        # BLE state.
-        self.client = None   # BleakClient
-        self.device = None   # BLEDevice
-        # TCP state.
+        self.client = None          # BleakClient
+        self.device = None          # BLEDevice
         self._tcp_reader: Optional[asyncio.StreamReader] = None
         self._tcp_writer: Optional[asyncio.StreamWriter] = None
+        self._ser = None            # pyserial Serial
 
-    # ── transport-agnostic helpers ──────────────────────────────────
+        # Token reporting state (persisted across restarts).
+        self._period = os.environ.get("BUDDY_TOKEN_PERIOD", "day")
+        self._reset_ts = 0.0
+        self._load_state()
+
+    # ── token usage ─────────────────────────────────────────────────
+
+    def _load_state(self) -> None:
+        try:
+            d = json.load(STATE_PATH.open())
+            self._period = d.get("period", self._period)
+            self._reset_ts = float(d.get("reset_ts", 0.0))
+        except Exception:
+            pass
+
+    def _save_state(self) -> None:
+        try:
+            STATE_PATH.write_text(json.dumps(
+                {"period": self._period, "reset_ts": self._reset_ts}))
+        except Exception:
+            pass
+
+    def period_tokens(self) -> int:
+        """Output tokens across transcripts in the current window, since the
+        later of the window start and the last reset."""
+        start = max(_period_start(self._period), self._reset_ts)
+        total = 0
+        try:
+            for p in PROJECTS_DIR.glob("*/*.jsonl"):
+                try:
+                    if p.stat().st_mtime < start - 1:
+                        continue   # whole file predates the window
+                except OSError:
+                    continue
+                try:
+                    with p.open("r", errors="replace") as f:
+                        for line in f:
+                            if '"output_tokens"' not in line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                            except Exception:
+                                continue
+                            ts = obj.get("timestamp")
+                            if ts:
+                                try:
+                                    t = datetime.fromisoformat(
+                                        ts.replace("Z", "+00:00")).timestamp()
+                                    if t < start:
+                                        continue
+                                except Exception:
+                                    pass
+                            usage = (obj.get("message") or {}).get("usage") or {}
+                            total += int(usage.get("output_tokens", 0) or 0)
+                except OSError:
+                    continue
+        except Exception:
+            pass
+        return total
+
+    def token_reset(self) -> None:
+        self._reset_ts = datetime.now(timezone.utc).timestamp()
+        self._save_state()
+        log("token usage reset")
+
+    def token_period(self, period: str) -> bool:
+        if period not in ("day", "week", "month", "all"):
+            return False
+        self._period = period
+        self._save_state()
+        log(f"token period -> {period}")
+        return True
+
+    # ── transport-agnostic ──────────────────────────────────────────
 
     def is_connected(self) -> bool:
         if self.transport == "ble":
             return bool(self.client and self.client.is_connected)
+        if self.transport == "serial":
+            return bool(self._ser and self._ser.is_open)
         return self._tcp_writer is not None and not self._tcp_writer.is_closing()
 
     @property
     def device_name(self) -> Optional[str]:
+        if self.transport == "serial":
+            return f"serial:{self._serial_port}"
         if self.transport == "tcp":
             return f"tcp:{self._host}"
         if self.transport == "tcp-listen":
@@ -107,55 +183,20 @@ class BuddyLink:
         return self.device.name if self.device else None
 
     async def connect(self) -> bool:
+        if self.transport == "serial":
+            return await self._serial_connect()
         if self.transport == "tcp":
             return await self._tcp_connect()
         if self.transport == "tcp-listen":
-            return self.is_connected()   # passive — the listener fills the link
+            return self.is_connected()
         return await self._ble_connect()
-
-    def _session_tokens(self) -> int:
-        """Cumulative output tokens from the most-recently-active transcript.
-        Read incrementally (only new bytes since last call) so it's cheap to
-        poll. Resets the running total when the active session changes."""
-        try:
-            files = list(PROJECTS_DIR.glob("*/*.jsonl"))
-            if not files:
-                return self._tok_total
-            latest = max(files, key=lambda p: p.stat().st_mtime)
-            if str(latest) != self._tok_path:
-                self._tok_path = str(latest)
-                self._tok_off = 0
-                self._tok_total = 0
-            with latest.open("rb") as f:
-                f.seek(self._tok_off)
-                data = f.read()
-                end = f.tell()
-            # Don't consume a half-written trailing line.
-            if data and not data.endswith(b"\n"):
-                nl = data.rfind(b"\n")
-                if nl < 0:
-                    return self._tok_total          # no complete line yet
-                end = self._tok_off + nl + 1
-                data = data[: nl + 1]
-            self._tok_off = end
-            for line in data.split(b"\n"):
-                if not line.strip():
-                    continue
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                usage = (obj.get("message") or {}).get("usage") or {}
-                self._tok_total += int(usage.get("output_tokens", 0) or 0)
-            return self._tok_total
-        except Exception:
-            return self._tok_total
 
     async def _send_initial(self) -> None:
         now = int(time.time())
         tz = -time.timezone if time.daylight == 0 else -time.altzone
         await self._send_json({"time": [now, tz]})
         await self._send_json({"cmd": "owner", "name": self._owner})
+        await self.push_tokens()
 
     async def _send_json(self, obj: dict) -> None:
         if not self.is_connected():
@@ -164,14 +205,17 @@ class BuddyLink:
         try:
             if self.transport == "ble":
                 await self.client.write_gatt_char(NUS_RX, line, response=True)
+            elif self.transport == "serial":
+                self._ser.write(line); self._ser.flush()
             else:
-                self._tcp_writer.write(line)
-                await self._tcp_writer.drain()
+                self._tcp_writer.write(line); await self._tcp_writer.drain()
         except Exception as exc:
             log(f"write failed: {exc}")
 
+    async def push_tokens(self) -> None:
+        await self._send_json({"cmd": "tokens", "set": self.period_tokens()})
+
     def _feed(self, data: bytes) -> None:
-        """Accumulate bytes, split on newline, dispatch each line."""
         self._rx_buf.extend(data)
         while b"\n" in self._rx_buf:
             line, _, rest = self._rx_buf.partition(b"\n")
@@ -187,54 +231,86 @@ class BuddyLink:
             pid = msg.get("id", ""); decision = msg.get("decision", "")
             fut = self.pending.pop(pid, None)
             if fut and not fut.done():
-                fut.set_result(decision)
-                log(f"device → {decision} for {pid}")
+                fut.set_result(decision); log(f"device -> {decision} for {pid}")
             return
         if msg.get("cmd") == "status":
             await self._send_json({"ack": "status", "ok": True,
                                    "data": {"name": "claude-code-bridge", "sec": False}})
             return
-        if "ack" in msg or "auth" in msg:
-            return
-        log(f"unhandled device msg: {msg}")
+        # acks / auth lines: ignore
 
-    # ── BLE transport ───────────────────────────────────────────────
+    # ── BLE ──────────────────────────────────────────────────────────
 
     async def _ble_connect(self) -> bool:
         try:
             from bleak import BleakClient, BleakScanner
         except ImportError:
-            log("BLE transport needs bleak: pip install bleak")
-            return False
-        log("scanning for Claude* peripherals (5s)…")
-        devices = await BleakScanner.discover(timeout=5.0)
-        cands = [d for d in devices if (d.name or "").startswith("Claude")]
+            log("BLE transport needs bleak"); return False
+        log("scanning for Claude* (5s)…")
+        devs = await BleakScanner.discover(timeout=5.0)
+        cands = [d for d in devs if (d.name or "").startswith("Claude")]
         if not cands:
             log("no Claude* device found"); return False
         self.device = cands[0]
-        log(f"connecting to {self.device.name} [{self.device.address}]")
         self.client = BleakClient(self.device.address)
         try:
             await self.client.connect()
         except Exception as exc:
-            log(f"connect failed: {exc}"); return False
+            log(f"BLE connect failed: {exc}"); return False
         await self.client.start_notify(NUS_TX, lambda _c, d: self._feed(bytes(d)))
         await self._send_initial()
+        log(f"BLE linked: {self.device.name}")
         return True
 
-    # ── TCP transport (WiFi / WireGuard) ────────────────────────────
+    # ── serial ───────────────────────────────────────────────────────
+
+    async def _serial_connect(self) -> bool:
+        try:
+            import serial
+        except ImportError:
+            log("serial transport needs pyserial"); return False
+        try:
+            ser = serial.Serial()
+            ser.port = self._serial_port; ser.baudrate = 115200
+            ser.dtr = False; ser.rts = False; ser.timeout = 0
+            ser.open()
+        except Exception as exc:
+            log(f"serial open failed: {exc}"); return False
+        self._ser = ser
+        await asyncio.sleep(1.2)            # device may reset on open
+        try: ser.reset_input_buffer()
+        except Exception: pass
+        asyncio.create_task(self._serial_read_pump())
+        await self._send_initial()
+        log(f"serial linked: {self._serial_port}")
+        return True
+
+    async def _serial_read_pump(self) -> None:
+        while self._ser and self._ser.is_open:
+            try:
+                n = self._ser.in_waiting
+                if n:
+                    self._feed(self._ser.read(n))
+            except Exception as exc:
+                log(f"serial read ended: {exc}"); break
+            await asyncio.sleep(0.05)
+        try:
+            if self._ser: self._ser.close()
+        except Exception:
+            pass
+        self._ser = None
+
+    # ── TCP dial ──────────────────────────────────────────────────────
 
     async def _tcp_connect(self) -> bool:
         host, _, port_s = self._host.partition(":")
         port = int(port_s or "6400")
-        log(f"connecting TCP to {host}:{port}…")
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port), timeout=6)
         except Exception as exc:
             log(f"tcp connect failed: {exc}"); return False
         self._tcp_reader, self._tcp_writer = reader, writer
-        # Authenticate: the device requires the token as the first line.
         if self._token:
             writer.write((self._token + "\n").encode()); await writer.drain()
             try:
@@ -242,12 +318,10 @@ class BuddyLink:
             except asyncio.TimeoutError:
                 log("tcp auth timeout"); await self._tcp_close(); return False
             if b'"ok"' not in auth:
-                log(f"tcp auth rejected: {auth!r}"); await self._tcp_close(); return False
-            log("tcp authenticated")
-        else:
-            log("warning: BUDDY_TOKEN unset — device will drop the connection")
+                log("tcp auth rejected"); await self._tcp_close(); return False
         asyncio.create_task(self._tcp_read_pump())
         await self._send_initial()
+        log(f"tcp linked: {self._host}")
         return True
 
     async def _tcp_read_pump(self) -> None:
@@ -258,21 +332,16 @@ class BuddyLink:
                     break
                 self._feed(data)
         except Exception as exc:
-            log(f"tcp read pump ended: {exc}")
+            log(f"tcp read ended: {exc}")
         await self._tcp_close()
 
     async def _tcp_close(self) -> None:
         w, self._tcp_writer, self._tcp_reader = self._tcp_writer, None, None
         if w:
-            try:
-                w.close()
-            except Exception:
-                pass
+            try: w.close()
+            except Exception: pass
 
     async def serve_listener(self) -> None:
-        """Listen-mode: the device dials IN (used over the VPN, where the
-        device can't accept inbound). First line from the device must be the
-        token; then that socket becomes the device link."""
         host, _, port_s = self._listen.partition(":")
         port = int(port_s or "6401")
 
@@ -280,13 +349,11 @@ class BuddyLink:
             peer = writer.get_extra_info("peername")
             try:
                 tok = (await asyncio.wait_for(reader.readline(), timeout=5)).decode().strip()
-            except (asyncio.TimeoutError, Exception):
+            except Exception:
                 writer.close(); return
             if self._token and tok != self._token:
-                log(f"device dial-in auth failed from {peer}")
-                writer.close(); return
+                log(f"dial-in auth failed from {peer}"); writer.close(); return
             if self.is_connected():
-                log(f"device already linked — dropping dial-in from {peer}")
                 writer.close(); return
             self._tcp_reader, self._tcp_writer = reader, writer
             log(f"device dialed in from {peer}")
@@ -294,8 +361,7 @@ class BuddyLink:
             try:
                 while not reader.at_eof():
                     data = await reader.read(512)
-                    if not data:
-                        break
+                    if not data: break
                     self._feed(data)
             except Exception as exc:
                 log(f"device link ended: {exc}")
@@ -306,21 +372,19 @@ class BuddyLink:
         async with server:
             await server.serve_forever()
 
-    # ── prompt API (transport-agnostic) ─────────────────────────────
+    # ── prompt + heartbeat ────────────────────────────────────────────
 
-    async def request_prompt(self, tool: str, hint: str, src: str, timeout_s: float) -> str:
+    async def request_prompt(self, tool, hint, src, timeout_s) -> str:
         if not self.is_connected():
             return "disconnected"
         pid = f"hook_{uuid.uuid4().hex[:10]}"
         fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
         self.pending[pid] = fut
-        tok = self._session_tokens()
         await self._send_json({
-            "total": 1, "running": 0, "waiting": 1,
-            "msg": f"approve: {tool}", "tokens": tok, "tokens_today": tok,
+            "total": 1, "running": 0, "waiting": 1, "msg": f"approve: {tool}",
             "prompt": {"id": pid, "tool": tool, "hint": hint, "src": src},
         })
-        log(f"→ device prompt {pid}: {tool} / {hint!r}")
+        log(f"-> device prompt {pid}: {tool} / {hint!r}")
         try:
             return await asyncio.wait_for(fut, timeout=timeout_s)
         except asyncio.TimeoutError:
@@ -332,21 +396,19 @@ class BuddyLink:
         while True:
             await asyncio.sleep(HEARTBEAT_S)
             if self.is_connected() and not self.pending:
-                tok = self._session_tokens()
-                await self._send_json({"total": 0, "running": 0, "waiting": 0,
-                                       "msg": "", "tokens": tok, "tokens_today": tok})
+                await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
+                await self.push_tokens()
 
     async def disconnect(self) -> None:
-        if self.transport == "tcp":
+        if self.transport in ("tcp", "tcp-listen"):
             await self._tcp_close()
+        elif self.transport == "serial" and self._ser:
+            try: self._ser.close()
+            except Exception: pass
         elif self.client and self.client.is_connected:
-            try:
-                await self.client.disconnect()
-            except Exception:
-                pass
+            try: await self.client.disconnect()
+            except Exception: pass
 
-
-# ── Unix socket server (unchanged contract) ─────────────────────────
 
 async def handle_client(link: BuddyLink, reader, writer) -> None:
     try:
@@ -359,17 +421,33 @@ async def handle_client(link: BuddyLink, reader, writer) -> None:
             writer.write(b'{"error":"bad json"}\n'); await writer.drain(); return
         op = req.get("op")
         if op == "status":
-            writer.write((json.dumps({
-                "connected": link.is_connected(), "device": link.device_name,
-            }) + "\n").encode())
+            resp = {"connected": link.is_connected(), "device": link.device_name,
+                    "tokens": link.period_tokens(), "period": link._period}
+            writer.write((json.dumps(resp) + "\n").encode())
         elif op == "prompt":
             decision = await link.request_prompt(
-                str(req.get("tool", "?"))[:19],
-                str(req.get("hint", ""))[:43],
+                str(req.get("tool", "?"))[:19], str(req.get("hint", ""))[:43],
                 str(req.get("src", "cli"))[:7],
-                float(req.get("timeout", DEFAULT_PROMPT_TIMEOUT_S)),
-            )
+                float(req.get("timeout", DEFAULT_PROMPT_TIMEOUT_S)))
             writer.write((json.dumps({"decision": decision}) + "\n").encode())
+        elif op == "send":
+            cmd = req.get("cmd")
+            ok = isinstance(cmd, dict) and link.is_connected()
+            if ok:
+                await link._send_json(cmd)
+            writer.write((json.dumps({"ok": ok}) + "\n").encode())
+        elif op == "token":
+            action = req.get("action")
+            if action == "reset":
+                link.token_reset(); await link.push_tokens()
+                writer.write((json.dumps({"ok": True, "tokens": link.period_tokens()}) + "\n").encode())
+            elif action == "period":
+                ok = link.token_period(str(req.get("value", "")))
+                if ok: await link.push_tokens()
+                writer.write((json.dumps({"ok": ok, "period": link._period,
+                                          "tokens": link.period_tokens()}) + "\n").encode())
+            else:
+                writer.write(b'{"error":"bad token action"}\n')
         else:
             writer.write(b'{"error":"unknown op"}\n')
         await writer.drain()
@@ -377,10 +455,8 @@ async def handle_client(link: BuddyLink, reader, writer) -> None:
         log(f"client handler error: {exc}")
     finally:
         writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
+        try: await writer.wait_closed()
+        except Exception: pass
 
 
 async def serve_socket(link: BuddyLink) -> None:
@@ -390,7 +466,7 @@ async def serve_socket(link: BuddyLink) -> None:
     server = await asyncio.start_unix_server(
         lambda r, w: handle_client(link, r, w), path=str(SOCK_PATH))
     os.chmod(SOCK_PATH, 0o600)
-    log(f"listening on {SOCK_PATH} (transport={link.transport})")
+    log(f"listening on {SOCK_PATH} (transport={link.transport}, period={link._period})")
     async with server:
         await server.serve_forever()
 
@@ -399,7 +475,7 @@ async def main() -> None:
     link = BuddyLink()
 
     def _shutdown(*_a):
-        log("shutdown signal — closing")
+        log("shutdown — closing")
         asyncio.create_task(link.disconnect())
         for t in asyncio.all_tasks():
             t.cancel()
@@ -415,15 +491,11 @@ async def main() -> None:
                 if await link.connect():
                     backoff = 2
                 else:
-                    log(f"retry in {backoff}s")
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, 60)
-                    continue
+                    await asyncio.sleep(backoff); backoff = min(backoff * 2, 60); continue
             await asyncio.sleep(5)
 
     tasks = [serve_socket(link), link.heartbeat_loop()]
-    tasks.append(link.serve_listener() if link.transport == "tcp-listen"
-                 else reconnector())
+    tasks.append(link.serve_listener() if link.transport == "tcp-listen" else reconnector())
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
