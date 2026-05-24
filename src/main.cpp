@@ -563,9 +563,11 @@ static void drawClockLandscape() {
   }
 
   // Pet redraw: 15 fps double-buffered (smooth), 5 fps direct-draw fallback.
+  // On a full repaint (orientation flip or screen-change entry) redraw the pet
+  // this frame too, so it isn't briefly blank after the fillScreen() clear.
   static uint32_t lastPetTick = 0;
   uint32_t redrawIntervalMs = petSprReady ? 66 : 200;
-  if (millis() - lastPetTick >= redrawIntervalMs) {
+  if (repaint || millis() - lastPetTick >= redrawIntervalMs) {
     lastPetTick = millis();
     if (buddyMode) {
       if (petSprReady) {
@@ -952,8 +954,9 @@ static void drawApproval() {
   spr.print("TOOL");
 
   int toolLen = strlen(tama.promptTool);
-  // Try size 3 first (18px glyph, ~7 chars in 135 wide); fall back as needed
-  uint8_t toolSize = (toolLen <= 7) ? 3 : (toolLen <= 10) ? 2 : 1;
+  // Tool-name title one notch smaller than before (was up to size 3): size 2
+  // (16px glyph, ~8 chars in 135 wide), falling back to size 1 when long.
+  uint8_t toolSize = (toolLen <= 9) ? 2 : 1;
   spr.setTextSize(toolSize);
   spr.setTextColor(p.text, p.bg);
   spr.setCursor(6, TOP + 38);
@@ -961,18 +964,24 @@ static void drawApproval() {
   spr.setTextSize(1);
 
   // ── COMMAND PREVIEW ──────────────────────────────────────────────
-  int previewY = TOP + 38 + (toolSize == 3 ? 26 : toolSize == 2 ? 18 : 12);
+  int previewY = TOP + 38 + (toolSize == 2 ? 18 : 12);
   spr.setTextColor(p.textDim, p.bg);
   spr.setCursor(6, previewY);
   spr.print("RUN");
   spr.setTextColor(p.text, p.bg);
   int hlen = strlen(tama.promptHint);
+  // Command preview in Font 2 (8x16) — a step up from the size-1 default so
+  // it's easier to read. ~18 proportional chars/line, two lines above the
+  // footer (the footer is drawn afterward and covers any 1-2px overrun).
+  spr.setTextFont(2);
+  spr.setTextSize(1);
   spr.setCursor(6, previewY + 10);
-  spr.printf("%.21s", tama.promptHint);
-  if (hlen > 21) {
-    spr.setCursor(6, previewY + 18);
-    spr.printf("%.21s", tama.promptHint + 21);
+  spr.printf("%.18s", tama.promptHint);
+  if (hlen > 18) {
+    spr.setCursor(6, previewY + 26);
+    spr.printf("%.18s", tama.promptHint + 18);
   }
+  spr.setTextFont(1);
 
   // ── ACTION FOOTER — ALLOW | DENY ────────────────────────────────
   const int FH = 36;       // footer height
@@ -1734,6 +1743,13 @@ void loop() {
     else applyDisplayMode();
     characterInvalidate();
     if (buddyMode) buddyInvalidate();
+    // The landscape clock draws direct-to-LCD and only full-clears on an
+    // orientation flip (paintedOrient != clockOrient). Arriving at the clock
+    // from another screen in the SAME orientation therefore leaves stale
+    // pixels in the regions the clock layout doesn't overpaint (the gap
+    // between the pet and the time). Force a full repaint on any clock
+    // transition. 0xFF can never equal a real clockOrient (0/1/3).
+    paintedOrient = 0xFF;
     wasClocking = clocking;
     wasLandscape = landscapeClock;
   }
