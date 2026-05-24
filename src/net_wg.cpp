@@ -62,6 +62,7 @@ void netWgInit() {
   IPAddress local;
   local.fromString(_ifAddr);
   bool ok = _wg.begin(local, _ifPriv, _peerHost, _peerPub, _peerPort);
+  Serial.printf("[wg] begin %s -> %s:%u = %d\n", _ifAddr, _peerHost, _peerPort, (int)ok);
   if (!ok) {
     snprintf(_lastErr, sizeof(_lastErr), "WireGuard.begin returned false");
     _state = WG_FAILED;
@@ -87,6 +88,7 @@ void netWgTick() {
   // is_initialized() returns true after the first successful handshake.
   // Before that the library is bound but no peer rekey has happened yet.
   if (_wg.is_initialized()) {
+    if (_state != WG_UP) Serial.println("[wg] handshake complete — tunnel UP");
     _state = WG_UP;
   }
 }

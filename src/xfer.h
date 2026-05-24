@@ -4,6 +4,8 @@
 #include "ble_bridge.h"
 #include <mbedtls/base64.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
+#include "net_wg.h"
 
 static File     _xFile;
 static uint32_t _xExpected = 0, _xWritten = 0;
@@ -106,6 +108,74 @@ inline bool xferCommand(JsonDocument& doc) {
     const char* n = doc["name"];
     if (n) ownerSet(n);
     _xAck("owner", n != nullptr);
+    return true;
+  }
+
+  // Provision WiFi + WireGuard over BLE, bypassing the softAP portal
+  // entirely (AP+BLE coexistence is unreliable on this chip; STA+BLE is
+  // fine). Shape:
+  //   {"cmd":"wifi","nets":[{"ssid":"..","pwd":".."},..],
+  //    "wg":"<wg-quick text>","apply":true}
+  // Writes the network list to NVS (wifi_ssidN/wifi_pwdN + wifi_n), the
+  // WG config via the existing parser, flips the wifi setting on, and
+  // (if apply) reboots straight into STA → WireGuard.
+  if (strcmp(cmd, "wifi") == 0) {
+    Preferences p;
+    p.begin("buddy", false);
+    uint8_t i = 0;
+    JsonArray nets = doc["nets"];
+    if (!nets.isNull()) {
+      for (JsonVariant v : nets) {
+        const char* s  = v["ssid"];
+        const char* pw = v["pwd"] | "";
+        if (s && *s && i < 4) {
+          char ks[14], kp[14];
+          snprintf(ks, sizeof(ks), "wifi_ssid%u", i);
+          snprintf(kp, sizeof(kp), "wifi_pwd%u",  i);
+          p.putString(ks, s);
+          p.putString(kp, pw);
+          i++;
+        }
+      }
+    }
+    p.putUChar("wifi_n", i);
+    // Optional bridge token — enables the TCP listener (WiFi/WireGuard
+    // transport). Without it the network listener stays off.
+    const char* tok = doc["token"];
+    if (tok && *tok) p.putString("tcp_token", tok);
+    // Optional dial-out peer "host:port" — device connects OUT to a
+    // listening bridge (used for VPN, where inbound to the device fails).
+    const char* peer = doc["peer"];
+    if (peer && *peer) p.putString("tcp_peer", peer);
+    // Write the enable flag in the SAME transaction as the networks.
+    // settingsSave() reuses the shared global Preferences object; routing
+    // s_wifi through this fresh local handle avoids the case where that
+    // shared handle is already-started and silently no-ops the write.
+    if (i > 0) {
+      p.putBool("s_wifi", true);
+      settings().wifi = true;   // keep in-memory state consistent
+    }
+    p.end();
+
+    const char* wg = doc["wg"];
+    if (wg && *wg) netWgSaveConfigFromText(wg);
+
+    // Diagnostic read-back: prove what actually landed in NVS.
+    {
+      Preferences q;
+      q.begin("buddy", true);
+      Serial.printf("[wifi] provisioned: s_wifi=%d wifi_n=%u ssid0='%s'\n",
+                    (int)q.getBool("s_wifi", false), q.getUChar("wifi_n", 0),
+                    q.getString("wifi_ssid0", "").c_str());
+      q.end();
+    }
+
+    _xAck("wifi", i > 0, i);
+
+    if ((doc["apply"] | false) && i > 0) {
+      delay(400);          // let the ack flush over BLE before we drop the link
+      ESP.restart();
+    }
     return true;
   }
 

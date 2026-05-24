@@ -31,6 +31,11 @@ size_t bleAvailable();
 int bleRead();
 size_t bleWrite(const uint8_t* data, size_t len);
 
+// Inject bytes into the same RX ring the BLE link fills, so an alternate
+// transport (the TCP bridge over WiFi/WireGuard) flows through the
+// identical line-buffer → _applyJson() → xferCommand() pipeline.
+void bleInjectRx(const uint8_t* data, size_t len);
+
 // Advertising control — the "bluetooth" setting toggles these. Disabling
 // advertising hides the stick from new desktop scans but keeps the BLE
 // stack initialized (full deinit/re-init is unreliable in the Arduino

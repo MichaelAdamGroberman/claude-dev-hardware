@@ -136,36 +136,92 @@ static uint32_t _staStartedMs   = 0;
 static bool     _staConnecting  = false;
 static const uint32_t STA_TIMEOUT_MS = 12000;
 
+// ── Multi-network (round-robin) ─────────────────────────────────────
+// Several saved networks, tried in turn. Stored in NVS as wifi_ssid0..,
+// wifi_pwd0.. with a wifi_n count (the "wifi" BLE command writes these).
+// We rotate on STA_TIMEOUT rather than scan-and-pick (WiFiMulti) so the
+// main loop never blocks on a scan — the pet keeps animating. The
+// GOT_IP event handler (registered once below) fires regardless of which
+// network associates, so NTP + state transitions are network-agnostic.
+static const int MAX_NETS = 4;
+static char _ssids[MAX_NETS][33];
+static char _pwds[MAX_NETS][65];
+static int  _netCount = 0;
+static int  _curNet   = 0;
+
+static void _beginNet(int idx) {
+  Serial.printf("[wifi] trying net %d/%d: '%s'\n", idx + 1, _netCount, _ssids[idx]);
+  WiFi.begin(_ssids[idx], _pwds[idx]);
+  _staConnecting = true;
+  _state         = NW_CONNECTING;
+  _staStartedMs  = millis();
+  _lastErr[0]    = 0;
+  snprintf(_ip, sizeof(_ip), "connecting...");
+}
+
 void netWifiInit() {
-  Serial.printf("[wifi] netWifiInit() setting=%s heap=%u\n",
-                settings().wifi ? "on" : "off", (unsigned)ESP.getFreeHeap());
-  if (!settings().wifi) {
+  // Read the enable flag straight from NVS. stats.h keeps settings() in a
+  // file-static struct, so THIS translation unit has its own copy that
+  // main.cpp's settingsLoad() never populates — reading settings().wifi
+  // here always saw the default (false), which is why WiFi never came up.
+  // NVS is the one source of truth shared across translation units.
+  Preferences p;
+  p.begin("buddy", true);
+  bool enabled = p.getUChar("s_wifi", 0) != 0;
+  Serial.printf("[wifi] netWifiInit() s_wifi=%d heap=%u\n",
+                (int)enabled, (unsigned)ESP.getFreeHeap());
+  if (!enabled) {
+    p.end();
     _state = NW_OFF;
     strncpy(_ip, "(off)", sizeof(_ip));
     return;
   }
 
-  Preferences p;
-  p.begin("buddy", true);
-  String ssid = p.getString("wifi_ssid", "");
-  String pwd  = p.getString("wifi_pwd",  "");
-  String brg  = p.getString("wifi_brg",  "");
+  // Load the saved network list (wifi_ssid0.., wifi_pwd0.., count wifi_n).
+  // Fall back to the legacy single-slot keys (wifi_ssid/wifi_pwd) so a
+  // device configured by the old portal still works.
+  String brg = p.getString("wifi_brg", "");
+  _netCount  = 0;
+  uint8_t n  = p.getUChar("wifi_n", 0);
+  for (uint8_t i = 0; i < n && _netCount < MAX_NETS; i++) {
+    char ks[14], kp[14];
+    snprintf(ks, sizeof(ks), "wifi_ssid%u", i);
+    snprintf(kp, sizeof(kp), "wifi_pwd%u",  i);
+    String s = p.getString(ks, "");
+    if (s.length() == 0) continue;
+    strncpy(_ssids[_netCount], s.c_str(), 32); _ssids[_netCount][32] = 0;
+    String pw = p.getString(kp, "");
+    strncpy(_pwds[_netCount], pw.c_str(), 64); _pwds[_netCount][64] = 0;
+    _netCount++;
+  }
+  if (_netCount == 0) {
+    String s = p.getString("wifi_ssid", "");
+    if (s.length()) {
+      strncpy(_ssids[0], s.c_str(), 32); _ssids[0][32] = 0;
+      String pw = p.getString("wifi_pwd", "");
+      strncpy(_pwds[0], pw.c_str(), 64); _pwds[0][64] = 0;
+      _netCount = 1;
+    }
+  }
   p.end();
   strncpy(_bridge, brg.c_str(), sizeof(_bridge) - 1);
   _bridge[sizeof(_bridge) - 1] = 0;
-  Serial.printf("[wifi] saved creds: ssid='%s' pwd_len=%d bridge='%s'\n",
-                ssid.c_str(), (int)pwd.length(), _bridge);
+  Serial.printf("[wifi] %d saved network(s), bridge='%s'\n", _netCount, _bridge);
 
-  if (ssid.length() == 0) {
-    Serial.println("[wifi] no saved SSID → opening config portal");
+  if (_netCount == 0) {
+    Serial.println("[wifi] no saved networks → opening config portal");
     startPortal();
     return;
   }
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("gr0m");
-  // Keep WiFi up across drops without us doing the work.
-  WiFi.setAutoReconnect(true);
+  // Round-robin owns the INITIAL connect — auto-reconnect must stay off
+  // here or it issues a competing WiFi.begin() to the previous SSID while
+  // we rotate, which (with a disconnect mid-flight) deinits the driver and
+  // crashes. We turn auto-reconnect ON only once we have an IP (GOT_IP),
+  // handing off "stay connected" duty to the stack.
+  WiFi.setAutoReconnect(false);
   WiFi.persistent(true);
   // Event handler — drives reconnect feedback in the UI without
   // polling. Lambda captures nothing; modifies file-scope state.
@@ -178,12 +234,14 @@ void netWifiInit() {
         snprintf(_ip, sizeof(_ip), "reconnecting...");
         break;
       case SYSTEM_EVENT_STA_GOT_IP:
-        Serial.printf("[wifi] STA got IP: %s rssi=%d\n",
-                      WiFi.localIP().toString().c_str(), WiFi.RSSI());
+        Serial.printf("[wifi] STA got IP: %s\n",
+                      WiFi.localIP().toString().c_str());
         snprintf(_ip, sizeof(_ip), "%s", WiFi.localIP().toString().c_str());
         _state = NW_ONLINE;
         _staConnecting = false;
         _lastErr[0] = 0;
+        // Connected — now let the stack keep us connected across drops.
+        WiFi.setAutoReconnect(true);
         // Kick off NTP so the ESP32 SYSTEM clock (time()) is valid. The
         // WireGuard handshake stamps a TAI64N timestamp read from the
         // system clock — without this it sits at 1970 and the tunnel
@@ -195,14 +253,8 @@ void netWifiInit() {
       default: break;
     }
   });
-  WiFi.begin(ssid.c_str(), pwd.c_str());
-  Serial.printf("[wifi] STA begin: '%s' (async, %dms timeout)\n",
-                ssid.c_str(), STA_TIMEOUT_MS);
-  _staConnecting = true;
-  _state         = NW_CONNECTING;
-  _staStartedMs  = millis();
-  _lastErr[0]    = 0;
-  snprintf(_ip, sizeof(_ip), "connecting...");
+  _curNet = 0;
+  _beginNet(_curNet);
 }
 
 void netWifiStop() {
@@ -226,14 +278,27 @@ void netWifiTick() {
       _staConnecting = false;
       _state = NW_ONLINE;
       snprintf(_ip, sizeof(_ip), "%s", WiFi.localIP().toString().c_str());
-      Serial.printf("[wifi] connected: ip=%s rssi=%d\n", _ip, WiFi.RSSI());
+      Serial.printf("[wifi] connected: ip=%s\n", _ip);
     } else if (millis() - _staStartedMs > STA_TIMEOUT_MS) {
-      _staConnecting = false;
-      snprintf(_lastErr, sizeof(_lastErr), "STA timeout");
-      Serial.println("[wifi] STA timeout — opening config portal");
-      WiFi.disconnect(true);
+      // status tells us WHY: 1=WL_NO_SSID_AVAIL (not visible / 5GHz-only),
+      // 4=WL_CONNECT_FAILED (bad password), 6=WL_DISCONNECTED (general).
+      Serial.printf("[wifi] '%s' failed, status=%d\n",
+                    _ssids[_curNet], (int)WiFi.status());
+      WiFi.disconnect(false);   // leave driver up — begin() switches AP cleanly
       delay(50);
-      startPortal();
+      if (_netCount > 1) {
+        // Rotate to the next saved network and keep trying. A travelling
+        // pet is rarely in range of every network at once, so we cycle
+        // indefinitely rather than give up — reconfig is over BLE anyway.
+        _curNet = (_curNet + 1) % _netCount;
+        Serial.printf("[wifi] STA timeout — rotating to net %d\n", _curNet);
+        _beginNet(_curNet);
+      } else {
+        _staConnecting = false;
+        snprintf(_lastErr, sizeof(_lastErr), "STA timeout");
+        Serial.println("[wifi] STA timeout — opening config portal");
+        startPortal();
+      }
     }
   }
 }
@@ -241,7 +306,6 @@ void netWifiTick() {
 NetWifiState netWifiState() { return _state; }
 bool netWifiOnline()        { return _state == NW_ONLINE; }
 bool netWifiPortalActive()  { return _portalRunning; }
-int  netWifiRSSI()          { return WiFi.RSSI(); }
 const char* netWifiIP()     { return _ip; }
 const char* netWifiBridgeAddr() { return _bridge; }
 const char* netWifiLastError() { return _lastErr; }

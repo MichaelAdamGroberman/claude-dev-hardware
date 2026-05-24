@@ -28,7 +28,6 @@ void        netWifiTick();
 NetWifiState netWifiState();
 bool        netWifiOnline();      // true when STA mode is connected
 bool        netWifiPortalActive(); // true when AP-config portal is up
-int         netWifiRSSI();         // signal strength in dBm (STA mode)
 const char* netWifiIP();           // current IP as printable string
 const char* netWifiBridgeAddr();   // configured Mac-bridge "host:port", "" if none
 const char* netWifiLastError();    // most recent failure reason, "" if none

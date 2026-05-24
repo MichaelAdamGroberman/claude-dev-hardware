@@ -192,7 +192,7 @@ inline void settingsLoad() {
   _prefs.begin("buddy", true);
   _settings.sound = _prefs.getBool("s_snd", true);
   _settings.bt    = _prefs.getBool("s_bt",  true);
-  _settings.wifi  = _prefs.getBool("s_wifi",false);
+  _settings.wifi  = _prefs.getUChar("s_wifi", 0) != 0;
   _settings.led   = _prefs.getBool("s_led", true);
   _settings.mic   = _prefs.getBool("s_mic", false);
   _settings.hud      = _prefs.getBool("s_hud", true);

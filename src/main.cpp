@@ -7,6 +7,7 @@
 #include "mic.h"
 #include "net_wifi.h"
 #include "net_wg.h"
+#include "net_tcp.h"
 
 TFT_eSprite spr = TFT_eSprite(&M5.Lcd);
 // Offscreen sprite for the landscape-clock pet area. Eliminates the
@@ -798,48 +799,40 @@ void drawInfo() {
     ln("  temp     %dC", (int)M5.Axp.GetTempInAXP192());
 
   } else if (infoPage == 4) {
-    _infoHeader(p, y, "BLUETOOTH", infoPage);
+    // All three transports on one page. State is read from cached getters
+    // (netWifiState / netWgState are updated in the tick loop, and RSSI is
+    // cached too) — nothing here polls a driver per render frame.
+    _infoHeader(p, y, "CONNECTIONS", infoPage);
+
+    // ── Bluetooth ──
     bool linked = settings().bt && dataBtActive();
+    spr.setTextColor(p.text, p.bg); ln("BT");
+    spr.setTextColor(linked ? GREEN : (settings().bt ? 0xFFE0 : p.textDim), p.bg);
+    ln("  %s", linked ? "linked" : (settings().bt ? "discoverable" : "off"));
 
-    spr.setTextColor(linked ? GREEN : (settings().bt ? HOT : p.textDim), p.bg);
-    spr.setTextSize(2);
-    spr.setCursor(4, y);
-    spr.print(linked ? "linked" : (settings().bt ? "discover" : "off"));
-    spr.setTextSize(1);
-    y += 20;
-
-    spr.setTextColor(p.textDim, p.bg);
-    spr.setTextColor(p.text, p.bg);
-    ln("  %s", btName);
-    spr.setTextColor(p.textDim, p.bg);
-    uint8_t mac[6] = {0};
-    esp_read_mac(mac, ESP_MAC_BT);
-    ln("  %02X:%02X:%02X:%02X:%02X:%02X",
-       mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-    y += 8;
-
-    if (linked) {
-      uint32_t age = (millis() - tama.lastUpdated) / 1000;
-      ln("  last msg  %lus", (unsigned long)age);
-    } else if (settings().bt) {
-      spr.setTextColor(p.text, p.bg);
-      ln("TO PAIR");
+    // ── WiFi ──
+    y += 4;
+    NetWifiState ws = netWifiState();
+    spr.setTextColor(p.text, p.bg); ln("WIFI");
+    uint16_t wc = (ws == NW_ONLINE) ? GREEN : (ws == NW_FAILED) ? HOT
+                : (ws == NW_OFF) ? p.textDim : 0xFFE0;
+    const char* wl = (ws == NW_ONLINE) ? "online" : (ws == NW_OFF) ? "off"
+                   : (ws == NW_PORTAL) ? "setup AP" : (ws == NW_FAILED) ? "failed"
+                   : "connecting";
+    spr.setTextColor(wc, p.bg); ln("  %s", wl);
+    if (ws == NW_ONLINE) {
       spr.setTextColor(p.textDim, p.bg);
-      ln(" Open Claude app");
-      ln(" > Developer");
-      ln(" > Hardware Buddy");
+      ln("  %s", netWifiIP());
     }
-    // WireGuard tunnel status — only shows once a tunnel is configured.
+
+    // ── VPN (WireGuard) — only once a tunnel is configured ──
     if (netWgState() != WG_OFF) {
       y += 4;
-      spr.setTextColor(p.text, p.bg);
-      ln("VPN");
-      NetWgState ws = netWgState();
-      uint16_t wc = (ws == WG_UP) ? GREEN : (ws == WG_FAILED) ? HOT : 0xFFE0;
-      spr.setTextColor(wc, p.bg);
-      ln("  %s", ws == WG_UP ? "up" : ws == WG_FAILED ? "failed" : "connecting");
-      spr.setTextColor(p.textDim, p.bg);
-      if (ws == WG_UP) ln("  %s", netWgTunnelIP());
+      NetWgState gs = netWgState();
+      spr.setTextColor(p.text, p.bg); ln("VPN");
+      spr.setTextColor(gs == WG_UP ? GREEN : gs == WG_FAILED ? HOT : 0xFFE0, p.bg);
+      ln("  %s", gs == WG_UP ? "up" : gs == WG_FAILED ? "failed" : "connecting");
+      if (gs == WG_UP) { spr.setTextColor(p.textDim, p.bg); ln("  %s", netWgTunnelIP()); }
     }
 
   } else {
@@ -1227,19 +1220,20 @@ static void drawWifiIndicator() {
     case NW_PORTAL:     fg = 0xFD20; lbl = "AP"; break;
     case NW_CONNECTING: fg = 0x07FF; lbl = "..."; break;
     case NW_ONLINE: {
-      int rssi = netWifiRSSI();
-      int bars = (rssi > -55) ? 3 : (rssi > -70) ? 2 : (rssi > -85) ? 1 : 0;
+      // Static "online" badge. No RSSI polling — querying signal strength
+      // wakes the radio and costs battery/CPU every frame, so we just show
+      // a fixed connected glyph instead of live bars.
       spr.fillRect(bx, by, bw, bh, bg);
       spr.drawRect(bx, by, bw, bh, 0x07E0);
-      uint16_t lit = 0x07E0, off = 0x2965;
+      uint16_t lit = 0x07E0;
       int sx = bx + 4;
-      spr.fillRect(sx,     by + 7, 2, 3, bars >= 1 ? lit : off);
-      spr.fillRect(sx + 4, by + 4, 2, 6, bars >= 2 ? lit : off);
-      spr.fillRect(sx + 8, by + 2, 2, 8, bars >= 3 ? lit : off);
+      spr.fillRect(sx,     by + 7, 2, 3, lit);
+      spr.fillRect(sx + 4, by + 4, 2, 6, lit);
+      spr.fillRect(sx + 8, by + 2, 2, 8, lit);
       spr.setTextColor(lit, bg);
       spr.setTextSize(1);
       spr.setCursor(bx + 16, by + 3);
-      spr.printf("%dd", -rssi);  // 55 = "55d" (dB strength)
+      spr.print("ON");
       return;
     }
     case NW_FAILED:     fg = 0xF800; lbl = "ERR"; break;
@@ -1567,6 +1561,12 @@ void loop() {
     netWgInit();
   }
   if (_wgStarted) netWgTick();
+
+  // TCP bridge listener — starts once WiFi is online (works over the LAN
+  // and, once WG is up, over the tunnel). No-ops unless a token is set.
+  static bool _tcpStarted = false;
+  if (!_tcpStarted && netWifiOnline()) { _tcpStarted = true; netTcpInit(); }
+  if (_tcpStarted) netTcpTick();
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;

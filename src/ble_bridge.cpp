@@ -1,10 +1,8 @@
 #include "ble_bridge.h"
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLESecurity.h>
-#include <BLE2902.h>
+#include "net_tcp.h"     // mirror outgoing acks to the TCP client too
+#include <NimBLEDevice.h>
 #include <Arduino.h>
+#include <esp_random.h>
 #include <string.h>
 
 // Nordic UART Service UUIDs — every BLE serial example uses these, so
@@ -22,13 +20,14 @@ static uint8_t  rxBuf[RX_CAP];
 static volatile size_t rxHead = 0;
 static volatile size_t rxTail = 0;
 
-static BLEServer*         server = nullptr;
-static BLECharacteristic* txChar = nullptr;
-static BLECharacteristic* rxChar = nullptr;
+static NimBLEServer*         server = nullptr;
+static NimBLECharacteristic* txChar = nullptr;
+static NimBLECharacteristic* rxChar = nullptr;
 static volatile bool      connected = false;
 static volatile bool      secure = false;
 static volatile uint32_t  passkey = 0;
 static volatile uint16_t  mtu = 23;
+static volatile uint16_t  connHandle = BLE_HS_CONN_HANDLE_NONE;
 
 static void rxPush(const uint8_t* p, size_t n) {
   for (size_t i = 0; i < n; i++) {
@@ -39,97 +38,89 @@ static void rxPush(const uint8_t* p, size_t n) {
   }
 }
 
-class RxCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* c) override {
+void bleInjectRx(const uint8_t* data, size_t len) { rxPush(data, len); }
+
+class RxCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& /*info*/) override {
     std::string v = c->getValue();
     if (!v.empty()) rxPush((const uint8_t*)v.data(), v.size());
   }
 };
 
-class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* s) override {
+// In NimBLE the server callbacks also carry the security/pairing events.
+// LE Secure Connections, passkey display: we are DisplayOnly, the central
+// is KeyboardOnly. The stack asks us for a passkey to show; we generate a
+// random 6-digit one and main.cpp polls blePasskey() to render it.
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer*, NimBLEConnInfo& info) override {
     connected = true;
+    connHandle = info.getConnHandle();
     Serial.println("[ble] connected");
   }
-  void onDisconnect(BLEServer* s) override {
+  void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason) override {
     connected = false;
     secure = false;
     passkey = 0;
     mtu = 23;
-    Serial.println("[ble] disconnected");
+    connHandle = BLE_HS_CONN_HANDLE_NONE;
+    Serial.printf("[ble] disconnected (reason=0x%x)\n", reason);
     // Restart advertising so the next client can find us.
-    BLEDevice::startAdvertising();
+    NimBLEDevice::startAdvertising();
   }
-  void onMtuChanged(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
-    mtu = param->mtu.mtu;
+  void onMTUChange(uint16_t newMtu, NimBLEConnInfo& /*info*/) override {
+    mtu = newMtu;
     Serial.printf("[ble] mtu=%u\n", mtu);
   }
-};
-
-// LE Secure Connections, passkey-entry: we are DisplayOnly, the central
-// is KeyboardOnly. The stack picks a random 6-digit passkey, calls
-// onPassKeyNotify here, and the user types it on the desktop. main.cpp
-// polls blePasskey() to render it.
-class SecCallbacks : public BLESecurityCallbacks {
-  uint32_t onPassKeyRequest() override { return 0; }
-  bool onConfirmPIN(uint32_t) override { return false; }
-  bool onSecurityRequest() override { return true; }
-  void onPassKeyNotify(uint32_t pk) override {
+  uint32_t onPassKeyDisplay() override {
+    uint32_t pk = esp_random() % 1000000;
     passkey = pk;
     Serial.printf("[ble] passkey %06lu\n", (unsigned long)pk);
+    return pk;
   }
-  void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override {
+  void onAuthenticationComplete(NimBLEConnInfo& info) override {
     passkey = 0;
-    secure = cmpl.success;
-    Serial.printf("[ble] auth %s\n", cmpl.success ? "ok" : "FAIL");
-    if (!cmpl.success && server) server->disconnect(server->getConnId());
+    secure = info.isEncrypted();
+    Serial.printf("[ble] auth %s\n", secure ? "ok" : "FAIL");
+    if (!secure && server && connHandle != BLE_HS_CONN_HANDLE_NONE) {
+      server->disconnect(connHandle);
+    }
   }
 };
 
 void bleInit(const char* deviceName) {
-  BLEDevice::init(deviceName);
+  NimBLEDevice::init(deviceName);
   // Request the biggest MTU we can get. macOS negotiates to 185 typically.
-  BLEDevice::setMTU(517);
+  NimBLEDevice::setMTU(517);
 
-  BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_MITM);
-  BLEDevice::setSecurityCallbacks(new SecCallbacks());
+  // LE Secure Connections + bonding + MITM (passkey-display pairing).
+  NimBLEDevice::setSecurityAuth(/*bonding*/true, /*mitm*/true, /*sc*/true);
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
 
-  server = BLEDevice::createServer();
+  server = NimBLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
 
-  BLEService* svc = server->createService(NUS_SERVICE_UUID);
+  NimBLEService* svc = server->createService(NUS_SERVICE_UUID);
 
+  // TX (device -> client) notifies. The link is encrypted, so the payload
+  // is protected; NimBLE auto-creates the CCCD for a NOTIFY characteristic.
   txChar = svc->createCharacteristic(
     NUS_TX_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY
+    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ_ENC
   );
-  txChar->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED);
-  BLE2902* cccd = new BLE2902();
-  cccd->setAccessPermissions(ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED);
-  txChar->addDescriptor(cccd);
 
+  // RX (client -> device) writes require an encrypted (bonded) link.
   rxChar = svc->createCharacteristic(
     NUS_RX_UUID,
-    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::WRITE_ENC
   );
-  rxChar->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
   rxChar->setCallbacks(new RxCallbacks());
 
   svc->start();
 
-  BLESecurity* sec = new BLESecurity();
-  sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-  sec->setCapability(ESP_IO_CAP_OUT);
-  sec->setKeySize(16);
-  sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-  sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-
-  BLEAdvertising* adv = BLEDevice::getAdvertising();
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(NUS_SERVICE_UUID);
-  adv->setScanResponse(true);
-  adv->setMinPreferred(0x06);   // iOS-friendly connection interval
-  adv->setMaxPreferred(0x12);
-  BLEDevice::startAdvertising();
+  adv->enableScanResponse(true);
+  NimBLEDevice::startAdvertising();
   Serial.printf("[ble] advertising as '%s'\n", deviceName);
 }
 
@@ -138,28 +129,22 @@ bool bleSecure()    { return secure; }
 uint32_t blePasskey() { return passkey; }
 
 void bleClearBonds() {
-  int n = esp_ble_get_bond_device_num();
-  if (n <= 0) return;
-  esp_ble_bond_dev_t* list = (esp_ble_bond_dev_t*)malloc(n * sizeof(esp_ble_bond_dev_t));
-  if (!list) return;
-  esp_ble_get_bond_device_list(&n, list);
-  for (int i = 0; i < n; i++) esp_ble_remove_bond_device(list[i].bd_addr);
-  free(list);
-  Serial.printf("[ble] cleared %d bond(s)\n", n);
+  NimBLEDevice::deleteAllBonds();
+  Serial.println("[ble] cleared all bonds");
 }
 
 static bool _advertising = true;
 
 void bleAdvertisingStart() {
   if (_advertising) return;
-  BLEDevice::startAdvertising();
+  NimBLEDevice::startAdvertising();
   _advertising = true;
   Serial.println("[ble] advertising started");
 }
 
 void bleAdvertisingStop() {
   if (!_advertising) return;
-  BLEDevice::getAdvertising()->stop();
+  NimBLEDevice::stopAdvertising();
   _advertising = false;
   Serial.println("[ble] advertising stopped");
 }
@@ -178,6 +163,10 @@ int bleRead() {
 }
 
 size_t bleWrite(const uint8_t* data, size_t len) {
+  // Mirror the whole payload to the TCP bridge client (if attached). TCP
+  // has no MTU limit and is independent of whether a BLE client is linked,
+  // so acks/status reach a network client even with no BLE peer.
+  netTcpWrite(data, len);
   if (!connected || !txChar) return 0;
   // ATT notify payload is limited to (MTU - 3). macOS negotiates 185, so
   // the 182-byte chunk works there; use the live mtu so a peer that caps

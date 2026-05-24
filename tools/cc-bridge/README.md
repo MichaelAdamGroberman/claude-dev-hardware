@@ -52,6 +52,49 @@ The bridge tags every prompt with `src:"cli"` so the firmware can render a
 small `cli` badge in the alarm bar — that's how you tell a Claude Code
 prompt apart from a desktop app prompt at a glance.
 
+## Transports — local BT / WiFi / VPN
+
+The daemon reaches the device over one of three transports, chosen by
+environment variable. The Unix-socket contract to the hook is identical
+across all of them, so nothing about the Claude Code side changes.
+
+| Where you are | Env on the daemon | Path |
+|---|---|---|
+| **local BT** (default) | *(none)* | scans for `Claude*`, BLE NUS |
+| **WiFi, same LAN** | `BUDDY_HOST=<device-ip>:6400` `BUDDY_TOKEN=<tok>` | daemon dials the device's TCP listener |
+| **WiFi + VPN** (remote) | `BUDDY_LISTEN=0.0.0.0:6401` `BUDDY_TOKEN=<tok>` | device **dials out** to the daemon over the WireGuard tunnel |
+
+The device's WiFi/WG support and the `tcp_token` (required for any network
+transport) are provisioned with a `wifi` command — most reliably sent over
+an already-working link (BLE or the TCP listener), since serial delivery is
+timing-sensitive:
+
+```jsonc
+{"cmd":"wifi",
+ "nets":[{"ssid":"home","pwd":"…"},{"ssid":"hotspot","pwd":"…"}],
+ "wg":"<wg-quick config>",          // optional: brings up the tunnel
+ "token":"<random hex>",            // enables the TCP listener (:6400)
+ "peer":"<bridge-tailnet-ip>:6401", // optional: enables dial-out (VPN)
+ "apply":true}                      // writes NVS + reboots
+```
+
+**Why the VPN path dials out:** the lightweight WireGuard-ESP32 stack
+carries device-*initiated* traffic but doesn't accept inbound connections
+to the tunnel IP. So for remote reach, point `peer` at the daemon's tailnet
+IP and run the daemon with `BUDDY_LISTEN`; the device opens the connection
+outward. On the LAN you can use either mode (the listener at `:6400` works
+for inbound there).
+
+## Claude Desktop
+
+The **Claude Desktop chat app shows tool prompts on the device natively
+over BLE** — that's the buddy's built-in purpose, no bridge needed (just
+re-pair once after a firmware update, since pairing keys reset). Desktop
+does **not** support PreToolUse hooks, and its native buddy link is
+BLE-only, so Desktop can't be routed over WiFi/VPN. For on-device approval
+over the network, use **Claude Code** (CLI or the Claude Code feature
+inside the desktop app), which this bridge serves over all three transports.
+
 ## Failure modes
 
 - **Daemon not running** → hook exits silently → Claude Code uses its
@@ -79,6 +122,17 @@ prompt apart from a desktop app prompt at a glance.
   <key>KeepAlive</key><true/>
   <key>StandardErrorPath</key>
   <string>/Users/michaelgroberman/.cache/claude-buddy/buddy.log</string>
+  <!-- Omit EnvironmentVariables for local BT. For WiFi add BUDDY_HOST +
+       BUDDY_TOKEN; for VPN add BUDDY_LISTEN + BUDDY_TOKEN instead. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>BUDDY_OWNER</key><string>gr0m</string>
+    <!-- WiFi (same LAN): -->
+    <!-- <key>BUDDY_HOST</key><string>10.0.0.33:6400</string> -->
+    <!-- VPN (device dials in): -->
+    <!-- <key>BUDDY_LISTEN</key><string>0.0.0.0:6401</string> -->
+    <!-- <key>BUDDY_TOKEN</key><string>…</string> -->
+  </dict>
 </dict>
 </plist>
 ```
