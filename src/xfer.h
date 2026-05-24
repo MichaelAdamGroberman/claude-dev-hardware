@@ -179,6 +179,26 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  // Switch radio mode. WiFi and BLE are mutually exclusive (shared radio);
+  // serial always works regardless. {"cmd":"radio","mode":"wifi"|"bt"|"off"}
+  // writes the settings and reboots into the chosen mode.
+  if (strcmp(cmd, "radio") == 0) {
+    const char* mode = doc["mode"] | "off";
+    bool wantWifi = (strcmp(mode, "wifi") == 0);
+    bool wantBt   = (strcmp(mode, "bt")   == 0);
+    Preferences p;
+    p.begin("buddy", false);
+    p.putBool("s_wifi", wantWifi);
+    p.putBool("s_bt",   wantBt);
+    p.end();
+    settings().wifi = wantWifi;
+    settings().bt   = wantBt;
+    _xAck("radio", true);
+    delay(400);
+    ESP.restart();
+    return true;
+  }
+
   if (strcmp(cmd, "status") == 0) {
     // Dump everything the info screens show. Manual printf rather than
     // ArduinoJson serialize — less heap churn, and the shape is fixed.

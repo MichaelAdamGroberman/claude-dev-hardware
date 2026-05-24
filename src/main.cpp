@@ -167,23 +167,26 @@ static void applySetting(uint8_t idx) {
       return;
     case 1: s.sound = !s.sound; break;
     case 2:
-      // BT toggle controls BLE advertising (discoverability).
-      // Full deinit is unreliable in the Arduino BLE library, so we
-      // start/stop advertising instead — existing connections stay,
-      // but new scans won't find the stick when off.
+      // WiFi and BLE share one radio and are mutually exclusive. Enabling
+      // BT turns WiFi off; we reboot so the radio comes up cleanly in the
+      // chosen mode (BLE is only initialized at boot, in BT mode).
       s.bt = !s.bt;
-      if (s.bt) bleAdvertisingStart();
-      else      bleAdvertisingStop();
-      break;
-    case 3:
-      // WiFi toggle — hot-start/stop the stack so the user doesn't have
-      // to reboot. When enabled with no saved creds, AP-config portal
-      // comes up at "gr0m-setup" / 192.168.4.1 immediately.
-      s.wifi = !s.wifi;
+      if (s.bt) s.wifi = false;
       settingsSave();
-      Serial.printf("[settings] wifi toggled %s\n", s.wifi ? "ON" : "OFF");
-      if (s.wifi) netWifiInit();
-      else        netWifiStop();
+      Serial.printf("[settings] BT %s — rebooting\n", s.bt ? "ON (wifi off)" : "OFF");
+      delay(150);
+      ESP.restart();
+      return;
+    case 3:
+      // Mutually exclusive with BT. Enabling WiFi turns BT off; reboot so
+      // the radio comes up in WiFi mode with no BLE init — WiFi + WireGuard
+      // then get the full radio.
+      s.wifi = !s.wifi;
+      if (s.wifi) s.bt = false;
+      settingsSave();
+      Serial.printf("[settings] WiFi %s — rebooting\n", s.wifi ? "ON (bt off)" : "OFF");
+      delay(150);
+      ESP.restart();
       return;
     case 4: s.led = !s.led; break;
     case 5: s.mic = !s.mic; micSetEnabled(s.mic); break;
@@ -1430,13 +1433,18 @@ void setup() {
   M5.Lcd.setRotation(0);
   M5.Imu.Init();
   M5.Beep.begin();
-  startBt();
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);   // off
   applyBrightness();
   lastInteractMs = millis();
   statsLoad();
   settingsLoad();
+  // Single 2.4 GHz radio — WiFi and BLE are mutually exclusive. If both got
+  // set, WiFi wins. In WiFi mode BLE is never initialized, so the radio is
+  // fully free for WiFi + WireGuard (BLE coexistence was blocking the WG
+  // handshake from completing).
+  if (settings().wifi && settings().bt) { settings().bt = false; settingsSave(); }
+  if (settings().bt) startBt();   // BLE only — WiFi is off in this branch
   petNameLoad();
   buddyInit();
 
@@ -1457,8 +1465,7 @@ void setup() {
 
   micInit();
   micSetEnabled(settings().mic);   // honor saved opt-in state
-  if (!settings().bt) bleAdvertisingStop();  // honor saved BT off state
-  netWifiInit();                   // STA connect if creds saved; AP portal otherwise
+  netWifiInit();                   // no-op unless WiFi mode (gated on s_wifi)
   characterInit(nullptr);  // scan /characters/ for whatever is installed
   gifAvailable = characterLoaded();
   // species NVS: 0..N-1 = ASCII species, 0xFF = use GIF (also the default,
