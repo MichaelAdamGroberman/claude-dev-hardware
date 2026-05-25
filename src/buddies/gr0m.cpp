@@ -1472,6 +1472,293 @@ static void drawHumanDisguise(uint32_t t) {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//   ALT HUMAN COSTUME — "undercover" easter egg (NOT the trench coat)
+// ────────────────────────────────────────────────────────────────────
+//   A second, deliberately worse human disguise, distinct from the
+//   Stage-5 trench-coat-and-fedora look. Here gr0m pulls on a brown wig,
+//   straps a flesh-tone face mask (with painted-on human eyes + nose)
+//   over the visor, throws a knit hoodie over the chest plate, and clutches
+//   a takeaway coffee cup to "look busy / normal". It's bad on PURPOSE:
+//   the square robot head corners and chassis rivets still poke out past
+//   the mask + wig, and the mouth twitches between an awkward straight line
+//   and a too-eager smile every ~2 s.
+//
+//   Geometry follows the existing 3D helpers so it tracks tilt like the
+//   rest of the character:
+//     • the wig + flesh mask + human eyes/nose/mouth ride the HEAD front
+//       plane (z = +22, via onFace) — they only render when the front face
+//       is toward us, so they vanish as the head turns away just like the
+//       visor and sunglasses do
+//     • the knit hoodie + V-neck + drawstrings ride the CHEST front plane
+//       (z = +12, via onChest) like the trench coat / brand bolt
+//     • the coffee cup is a held prop anchored beside the chest via rp()
+//       so it leans with the body
+//   Exposed below the namespace as gr0mRenderHumanCostume() — a standalone
+//   full-screen scene like the DJ booth, not an evolution-gated mood.
+// ════════════════════════════════════════════════════════════════════
+
+// Costume palette (RGB565). Browns/flesh tones so the disguise reads as
+// fabric + skin against the cold brushed-steel chassis underneath.
+static const uint16_t HC_SKIN     = 0xED90;  // #e8b386 flesh
+static const uint16_t HC_SKIN_SH  = 0xBC2B;  // #b8825a cheek / nose shadow
+static const uint16_t HC_HAIR     = 0x59C3;  // #5a3a1e warm brown wig (reads clearly as hair)
+static const uint16_t HC_HAIR_HI  = 0x8B0C;  // #8a5a30 lighter strand highlight
+static const uint16_t HC_HOODIE   = 0x39ED;  // #3a4a6b knit hoodie
+static const uint16_t HC_HOODIE_DK= 0x29CB;  // #2a3858 pocket pouch
+static const uint16_t HC_HOODIE_LI= 0x5B51;  // #5a6a8b seam highlight / stitches
+static const uint16_t HC_HOODIE_TR= 0x1907;  // #1a2238 trim / hem
+static const uint16_t HC_STRING   = 0xCE59;  // drawstring cord
+static const uint16_t HC_MOUTH    = 0x79C3;  // #7a3818 painted mouth
+static const uint16_t HC_CUP       = 0xFFFF; // white takeaway cup
+static const uint16_t HC_CUP_LID   = 0x39C3; // brown lid / rim
+static const uint16_t HC_CUP_SLV   = 0xCCCD; // kraft sleeve
+static const uint16_t HC_STEAM     = 0xDEFB; // pale steam wisp
+
+// Knit hoodie over the chest plate, with a hood draped behind the head, a
+// V-neck of skin showing, drawstrings, a kangaroo pocket, and sparse knit
+// stitches. Rides the chest front plane (onChest) so it leans with the body
+// like the trench coat. The hood "wings" use rp() so they splay either side
+// of the head and track tilt too.
+static void drawCostumeHoodie() {
+  // ── Hood drape behind the head ── two soft wings rising from the
+  // shoulders up past the head sides. Drawn first so the head + wig overlap.
+  // Built on the chest plane so they lean with the torso.
+  V2 hwL0 = onChest(-22, 26);   // left shoulder
+  V2 hwL1 = onChest(-30, 10);   // up the left of the head
+  V2 hwL2 = onChest(-14, 22);   // inner fold
+  V2 hwR0 = onChest( 22, 26);
+  V2 hwR1 = onChest( 30, 10);
+  V2 hwR2 = onChest( 14, 22);
+  _t->fillTriangle(hwL0.x, hwL0.y, hwL1.x, hwL1.y, hwL2.x, hwL2.y, HC_HOODIE_DK);
+  _t->fillTriangle(hwR0.x, hwR0.y, hwR1.x, hwR1.y, hwR2.x, hwR2.y, HC_HOODIE_DK);
+
+  // ── Main body — broad knit panel over the chest front, a touch wider
+  // than the chest cube so it reads as draped fabric.
+  V2 tl = onChest(-24, 26);
+  V2 tr = onChest( 24, 26);
+  V2 br = onChest( 22, 52);
+  V2 bl = onChest(-22, 52);
+  _t->fillTriangle(tl.x, tl.y, tr.x, tr.y, br.x, br.y, HC_HOODIE);
+  _t->fillTriangle(tl.x, tl.y, br.x, br.y, bl.x, bl.y, HC_HOODIE);
+  // Collar seam highlight + hem trim.
+  _t->drawLine(tl.x, tl.y, tr.x, tr.y, HC_HOODIE_LI);
+  _t->drawLine(bl.x, bl.y, br.x, br.y, HC_HOODIE_TR);
+
+  // ── V-neck — triangle of skin showing at the collar.
+  V2 vL = onChest(-11, 26);
+  V2 vR = onChest( 11, 26);
+  V2 vB = onChest(  0, 36);
+  _t->fillTriangle(vL.x, vL.y, vR.x, vR.y, vB.x, vB.y, HC_SKIN);
+  _t->drawLine(vL.x, vL.y, vB.x, vB.y, HC_HOODIE_TR);
+  _t->drawLine(vR.x, vR.y, vB.x, vB.y, HC_HOODIE_TR);
+
+  // ── Drawstrings dangling from the collar.
+  V2 dsL0 = onChest(-5, 36), dsL1 = onChest(-6, 44);
+  V2 dsR0 = onChest( 4, 36), dsR1 = onChest( 5, 43);
+  _t->drawLine(dsL0.x, dsL0.y, dsL1.x, dsL1.y, HC_STRING);
+  _t->drawLine(dsR0.x, dsR0.y, dsR1.x, dsR1.y, HC_STRING);
+  _t->fillCircle(dsL1.x, dsL1.y, pkS(1), HC_HOODIE_LI);
+  _t->fillCircle(dsR1.x, dsR1.y, pkS(1), HC_HOODIE_LI);
+
+  // ── Kangaroo pocket pouch across the lower front.
+  V2 pTL = onChest(-15, 44), pTR = onChest( 15, 44);
+  V2 pBR = onChest( 13, 50), pBL = onChest(-13, 50);
+  _t->fillTriangle(pTL.x, pTL.y, pTR.x, pTR.y, pBR.x, pBR.y, HC_HOODIE_DK);
+  _t->fillTriangle(pTL.x, pTL.y, pBR.x, pBR.y, pBL.x, pBL.y, HC_HOODIE_DK);
+  _t->drawLine(pTL.x, pTL.y, pTR.x, pTR.y, HC_HOODIE_TR);
+
+  // ── Sparse knit stitches — short diagonals across the body.
+  for (int i = 0; i < 5; i++) {
+    float x = -16.0f + i * 8.0f;
+    V2 a = onChest(x,        38);
+    V2 b = onChest(x + 3.0f, 42);
+    _t->drawLine(a.x, a.y, b.x, b.y, HC_HOODIE_LI);
+  }
+}
+
+// Flesh-tone face mask strapped over the visor: a skin slab with painted-on
+// human eyes (whites + brown pupils that shift a touch with tilt), a nose
+// shadow, brow lines, cheek shadows, and a mouth whose shape is the twitch
+// channel. Rides the head front plane (onFace) and only draws front-on.
+// `expr`: 1 = eager smile, 2 = awkward flat line (the ~2 s twitch pair).
+static void drawCostumeFaceMask(uint8_t expr) {
+  if (!frontFaceVisible()) return;
+  // Skin slab over the visor / lower face. Deliberately a hair too small for
+  // the square head, so the chassis corners + rivets still poke out — that's
+  // the joke. Two triangles so it skews with rotation.
+  V2 mTL = onFace(-19, -10);
+  V2 mTR = onFace( 19, -10);
+  V2 mBR = onFace( 17,  17);
+  V2 mBL = onFace(-17,  17);
+  _t->fillTriangle(mTL.x, mTL.y, mTR.x, mTR.y, mBR.x, mBR.y, HC_SKIN);
+  _t->fillTriangle(mTL.x, mTL.y, mBR.x, mBR.y, mBL.x, mBL.y, HC_SKIN);
+
+  // Cheek shadows for a little dimension.
+  V2 chL = onFace(-13, 8), chR = onFace(11, 8);
+  _t->fillCircle(chL.x, chL.y, pkS(2), HC_SKIN_SH);
+  _t->fillCircle(chR.x, chR.y, pkS(2), HC_SKIN_SH);
+
+  // Brow lines above each eye.
+  V2 brL0 = onFace(-16, -6), brL1 = onFace(-5, -6);
+  V2 brR0 = onFace(  5, -6), brR1 = onFace(16, -6);
+  _t->drawLine(brL0.x, brL0.y, brL1.x, brL1.y, HC_SKIN_SH);
+  _t->drawLine(brR0.x, brR0.y, brR1.x, brR1.y, HC_SKIN_SH);
+
+  // Human eyes — white sclera blocks with brown pupils that drift slightly
+  // with tilt (shifty disguise eyes), a dark outline, and a catchlight pixel.
+  float px = (float)_tiltX * 0.5f;
+  V2 eL = onFace(-10, -1), eR = onFace(10, -1);
+  int ew = pkS(6), eh = pkS(5); if (ew < 3) ew = 3; if (eh < 3) eh = 3;
+  _t->fillRect(eL.x - ew, eL.y - eh / 2, ew * 2, eh, HC_CUP);
+  _t->fillRect(eR.x - ew, eR.y - eh / 2, ew * 2, eh, HC_CUP);
+  _t->drawRect(eL.x - ew, eL.y - eh / 2, ew * 2, eh, HC_SKIN_SH);
+  _t->drawRect(eR.x - ew, eR.y - eh / 2, ew * 2, eh, HC_SKIN_SH);
+  V2 pL = onFace(-10 + px, -1), pR = onFace(10 + px, -1);
+  int pr = pkS(2); if (pr < 1) pr = 1;
+  _t->fillCircle(pL.x, pL.y, pr, HC_HAIR);
+  _t->fillCircle(pR.x, pR.y, pr, HC_HAIR);
+  _t->drawPixel(pL.x - 1, pL.y - 1, HC_CUP);
+  _t->drawPixel(pR.x - 1, pR.y - 1, HC_CUP);
+
+  // Nose — a thin vertical shadow + a little nostril shelf.
+  V2 nT = onFace(0, 2), nB = onFace(0, 7);
+  _t->drawLine(nT.x, nT.y, nB.x, nB.y, HC_SKIN_SH);
+  V2 nL = onFace(-2, 7), nR = onFace(2, 7);
+  _t->drawLine(nL.x, nL.y, nR.x, nR.y, HC_SKIN_SH);
+
+  // Mouth — the twitch channel. 1 = eager smile arc, else awkward flat line.
+  if (expr == 1) {
+    V2 sL = onFace(-8, 11), sC = onFace(0, 15), sR = onFace(8, 11);
+    _t->drawLine(sL.x, sL.y, sC.x, sC.y, HC_MOUTH);
+    _t->drawLine(sC.x, sC.y, sR.x, sR.y, HC_MOUTH);
+    _t->drawLine(sL.x, sL.y + 1, sC.x, sC.y + 1, HC_MOUTH);
+    _t->drawLine(sC.x, sC.y + 1, sR.x, sR.y + 1, HC_MOUTH);
+  } else {
+    V2 fL = onFace(-8, 12), fR = onFace(8, 12);
+    _t->drawLine(fL.x, fL.y, fR.x, fR.y, HC_MOUTH);
+    _t->drawLine(fL.x, fL.y + 1, fR.x, fR.y + 1, HC_MOUTH);
+    // tiny lopsided tic so the awkward beat reads as forced
+    V2 tic = onFace(-5, 13);
+    _t->drawPixel(tic.x, tic.y, HC_MOUTH);
+    _t->drawPixel(tic.x, tic.y + 1, HC_MOUTH);
+  }
+
+  // Stubble shadow specks along the chin.
+  for (int i = -1; i <= 1; i++) {
+    V2 s = onFace(i * 5.0f, 16);
+    _t->drawPixel(s.x, s.y, HC_SKIN_SH);
+  }
+}
+
+// Brown wig wrapping the top + sides of the head. Rides the head front
+// plane so it tracks rotation; draws front-on only. Sits a little above the
+// chassis top so the square head edge still shows beneath the hairline.
+static void drawCostumeWig() {
+  if (!frontFaceVisible()) return;
+  // Main wig mass — a broad band across the forehead. Sits a touch inside the
+  // square chassis top (y=-20) so the head's corners + rivets still show.
+  V2 wTL = onFace(-21, -20);
+  V2 wTR = onFace( 21, -20);
+  V2 wBR = onFace( 22,  -6);   // fringe drops down to the brow on the right
+  V2 wBL = onFace(-22,  -6);
+  _t->fillTriangle(wTL.x, wTL.y, wTR.x, wTR.y, wBR.x, wBR.y, HC_HAIR);
+  _t->fillTriangle(wTL.x, wTL.y, wBR.x, wBR.y, wBL.x, wBL.y, HC_HAIR);
+  // Rounded crown — a fat dome above the band so it reads as a head of hair,
+  // not a cap. Two triangles fanning up to a peaked top.
+  V2 cTL = onFace(-15, -30);
+  V2 cTR = onFace( 15, -30);
+  V2 cPk = onFace(  0, -33);
+  _t->fillTriangle(wTL.x, wTL.y, wTR.x, wTR.y, cTR.x, cTR.y, HC_HAIR);
+  _t->fillTriangle(wTL.x, wTL.y, cTR.x, cTR.y, cTL.x, cTL.y, HC_HAIR);
+  _t->fillTriangle(cTL.x, cTL.y, cTR.x, cTR.y, cPk.x, cPk.y, HC_HAIR);
+  // Sideburns down the temples (a few px thick).
+  V2 sbL0 = onFace(-21, -6), sbL1 = onFace(-20, 4);
+  V2 sbR0 = onFace( 21, -6), sbR1 = onFace( 20, 4);
+  for (int o = 0; o < 3; o++) {
+    _t->drawLine(sbL0.x + o, sbL0.y, sbL1.x + o, sbL1.y, HC_HAIR);
+    _t->drawLine(sbR0.x - o, sbR0.y, sbR1.x - o, sbR1.y, HC_HAIR);
+  }
+  // Hairline fringe wisps — a jagged bottom edge so it isn't a flat block.
+  for (int x = -16; x <= 16; x += 5) {
+    V2 a = onFace((float)x, -6);
+    V2 b = onFace((float)x + 2, -2);
+    _t->drawLine(a.x, a.y, b.x, b.y, HC_HAIR);
+  }
+  // A side part + a couple of stray highlight strands on the crown.
+  V2 pt0 = onFace(-4, -28), pt1 = onFace(-6, -12);
+  _t->drawLine(pt0.x, pt0.y, pt1.x, pt1.y, HC_HAIR_HI);
+  V2 hi0 = onFace(6, -26), hi1 = onFace(12, -20);
+  _t->drawLine(hi0.x, hi0.y, hi1.x, hi1.y, HC_HAIR_HI);
+}
+
+// Takeaway coffee cup held beside the chest — completes the "just a normal
+// commuter" look. Anchored on the chest plane via onChest so it leans with
+// the body; a little steam wisps off the lid.
+static void drawCostumeCoffee(uint32_t t) {
+  // Cup body — a tapered white tube to the lower right of the chest.
+  V2 cTL = onChest(26, 36), cTR = onChest(36, 36);
+  V2 cBR = onChest(34, 52), cBL = onChest(28, 52);
+  _t->fillTriangle(cTL.x, cTL.y, cTR.x, cTR.y, cBR.x, cBR.y, HC_CUP);
+  _t->fillTriangle(cTL.x, cTL.y, cBR.x, cBR.y, cBL.x, cBL.y, HC_CUP);
+  // Brown rim under the lid.
+  _t->drawLine(cTL.x, cTL.y, cTR.x, cTR.y, HC_CUP_LID);
+  _t->drawLine(cTL.x, cTL.y + 1, cTR.x, cTR.y + 1, HC_CUP_LID);
+  // Lid tab above the rim.
+  V2 lL = onChest(28, 33), lR = onChest(34, 33);
+  _t->drawLine(lL.x, lL.y, lR.x, lR.y, HC_CUP_LID);
+  V2 ltL = onChest(30, 31), ltR = onChest(32, 31);
+  _t->drawLine(ltL.x, ltL.y, ltR.x, ltR.y, HC_CUP_LID);
+  // Kraft sleeve band around the middle.
+  V2 svTL = onChest(26, 43), svTR = onChest(35, 43);
+  V2 svBR = onChest(34, 47), svBL = onChest(27, 47);
+  _t->fillTriangle(svTL.x, svTL.y, svTR.x, svTR.y, svBR.x, svBR.y, HC_CUP_SLV);
+  _t->fillTriangle(svTL.x, svTL.y, svBR.x, svBR.y, svBL.x, svBL.y, HC_CUP_SLV);
+  _t->drawLine(svTL.x, svTL.y, svTR.x, svTR.y, HC_CUP_LID);
+  // Steam — three short wisps rising + drifting (animated, anti-gravity).
+  for (int i = 0; i < 3; i++) {
+    int phase = ((int)(t / 120) + i * 4) % 12;
+    V2 s = onChest(28.0f + i * 3.0f, 28.0f - phase);
+    if (s.y < 1) continue;
+    _t->drawPixel(s.x, s.y, HC_STEAM);
+    _t->drawPixel(s.x + ((phase & 1) ? 1 : -1), s.y - 1, HC_STEAM);
+  }
+}
+
+// One-call composite for the alt costume. Order matters: hoodie (body layer)
+// behind, then the face mask over the visor, then the wig over the chassis
+// top, then the held coffee cup on top of everything.
+static void drawAltHumanCostume(uint32_t t, uint8_t expr) {
+  drawCostumeHoodie();
+  drawCostumeFaceMask(expr);
+  drawCostumeWig();
+  drawCostumeCoffee(t);
+}
+
+// Alt-costume scene body — composed onto whatever surface _t points at.
+// Called from the global trampoline below (which sets _t = tgt first).
+// Draws the base bot first (so the square head corners + rivets peek out
+// past the disguise), then layers the costume. The mouth twitches between
+// awkward (2) and smile (1) every ~2 s; `t` is millis().
+static void humanCostumeScene(uint32_t t) {
+  _t = buddyTarget();
+  readTilt();
+  _yProjOff = 0;
+  drawShadow(0);
+  // Base bot underneath — head edges + chassis rivets stay visible.
+  drawChest3D();
+  drawBolt3D(VISOR_IDLE);
+  drawNeck3D();
+  drawHead3D();
+  drawVisor3D(VISOR_IDLE);   // visor under the mask — peeks at the head edges
+  drawAntenna3D(0);
+  // Costume on top. ~2 s twitch: 2000 ms per half-cycle.
+  uint8_t expr = ((t / 2000) & 1) ? 1 : 2;   // 1 smile, 2 awkward
+  drawAltHumanCostume(t, expr);
+  // A faint mood wisp for atmosphere, like the other scenes.
+  drawMoodParticles(t, 2, 2);
+}
+
+// ════════════════════════════════════════════════════════════════════
 //   DJ MODE — "gr0m on the decks" booth scene (bonus, not a mood-state)
 // ────────────────────────────────────────────────────────────────────
 //   A standalone full-detail scene driven by a deterministic internal
@@ -1824,6 +2111,16 @@ static void doHeart(uint32_t t) {
 void gr0mRenderDJ(TFT_eSPI* tgt, uint32_t t) {
   gr0m::_t = tgt;
   gr0m::djScene(t);
+}
+
+// Alt human-costume easter-egg entry point — global so the main loop can
+// call it without touching the gr0m namespace internals. Points the
+// namespace's active render surface at `tgt` (mirrors gr0mRenderDJ), then
+// composes the scene. `t` is millis(). No trigger is wired here — the caller
+// decides when to show it.
+void gr0mRenderHumanCostume(TFT_eSPI* tgt, uint32_t t) {
+  gr0m::_t = tgt;
+  gr0m::humanCostumeScene(t);
 }
 
 extern const Species GR0M_SPECIES = {
