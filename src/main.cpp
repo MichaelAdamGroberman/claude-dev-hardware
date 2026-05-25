@@ -1206,10 +1206,14 @@ static void drawApproval() {
   spr.fillRect(0, TOP, W, AREA, p.bg);
 
   // ── ALARM BAR ───────────────────────────────────────────────────
+  // Red on arrival; flips to amber once the request has been pending >10 s so
+  // a glance at the bar colour (not just the timer digits) signals staleness.
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
-  spr.fillRect(0, TOP, W, 22, ALARM);
+  const uint16_t AMBER = 0xFD20;          // orange-amber for the "stale" bar
+  uint16_t barCol = (waited >= 10) ? AMBER : ALARM;
+  spr.fillRect(0, TOP, W, 22, barCol);
   spr.setTextSize(2);
-  spr.setTextColor(0x0000, ALARM);
+  spr.setTextColor(0x0000, barCol);
   spr.setCursor(6, TOP + 4);
   spr.print("APPROVE");
   // Source badge — bridge tags prompts with "cli" / "app" / "mob".
@@ -1217,15 +1221,16 @@ static void drawApproval() {
   // whether the prompt came from Claude Code, the desktop app, etc.
   if (tama.promptSrc[0]) {
     spr.setTextSize(1);
-    spr.setTextColor(0xFFFF, ALARM);
+    spr.setTextColor(0xFFFF, barCol);
     spr.setCursor(6 + 7 * 12 + 4, TOP + 8);
     spr.print(tama.promptSrc);
   }
-  // elapsed time, right-aligned, turns yellow after 10s
+  // elapsed time, right-aligned, black on the bar (the bar itself carries the
+  // colour state now, so the digits stay high-contrast at every age).
   spr.setTextSize(2);
   char tb[8]; snprintf(tb, sizeof(tb), "%lus", (unsigned long)waited);
   int tlen = strlen(tb);
-  spr.setTextColor(waited >= 10 ? 0xFFE0 : 0x0000, ALARM);
+  spr.setTextColor(0x0000, barCol);
   spr.setCursor(W - tlen * 12 - 6, TOP + 4);
   spr.print(tb);
 
@@ -1236,9 +1241,10 @@ static void drawApproval() {
   spr.print("TOOL");
 
   int toolLen = strlen(tama.promptTool);
-  // Tool-name title one notch smaller than before (was up to size 3): size 2
-  // (16px glyph, ~8 chars in 135 wide), falling back to size 1 when long.
-  uint8_t toolSize = (toolLen <= 9) ? 2 : 1;
+  // Hero the tool name: size 3 (18px glyph, ~7 chars across 135 wide) is the
+  // design target ("Bash" fills the panel). Step down to 2 then 1 only when
+  // the name is too long to fit, so common tools stay huge.
+  uint8_t toolSize = (toolLen <= 7) ? 3 : (toolLen <= 10) ? 2 : 1;
   spr.setTextSize(toolSize);
   spr.setTextColor(p.text, p.bg);
   spr.setCursor(6, TOP + 38);
@@ -1246,22 +1252,26 @@ static void drawApproval() {
   spr.setTextSize(1);
 
   // ── COMMAND PREVIEW ──────────────────────────────────────────────
-  int previewY = TOP + 38 + (toolSize == 2 ? 18 : 12);
+  // "RUN" label, then the command on the next line(s). The footer at the very
+  // bottom is drawn afterward and paints over any overrun, so the line budget
+  // here is sized to the gap between the tool name and the footer:
+  //   size 3 tool → 1 preview line, size 2/1 → up to 2 lines.
+  int previewY = TOP + 38 + (toolSize == 3 ? 26 : toolSize == 2 ? 18 : 12);
   spr.setTextColor(p.textDim, p.bg);
   spr.setCursor(6, previewY);
   spr.print("RUN");
   spr.setTextColor(p.text, p.bg);
-  int hlen = strlen(tama.promptHint);
-  // Command preview in Font 2 (8x16) — a step up from the size-1 default so
-  // it's easier to read. ~18 proportional chars/line, two lines above the
-  // footer (the footer is drawn afterward and covers any 1-2px overrun).
+  // Command preview in Font 2 (8px proportional). ~16 chars fit across the
+  // 135 px screen per line; hard-truncate to the available line budget so the
+  // text never spills past the action footer.
   spr.setTextFont(2);
   spr.setTextSize(1);
-  spr.setCursor(6, previewY + 10);
-  spr.printf("%.18s", tama.promptHint);
-  if (hlen > 18) {
-    spr.setCursor(6, previewY + 26);
-    spr.printf("%.18s", tama.promptHint + 18);
+  int hlen = strlen(tama.promptHint);
+  spr.setCursor(6, previewY + 12);
+  spr.printf("%.16s", tama.promptHint);
+  if (toolSize != 3 && hlen > 16) {
+    spr.setCursor(6, previewY + 28);
+    spr.printf("%.16s", tama.promptHint + 16);
   }
   spr.setTextFont(1);
 
@@ -1320,16 +1330,23 @@ static void tinyHeart(int x, int y, bool filled, uint16_t col) {
 // content starts at y=88 to leave 16 px for the title row.
 static void drawPetStats(const Palette& p) {
   const int TOP = 70;
+  // Warm orange for the LV pill (design). Named LV_ORANGE to avoid colliding
+  // with the M5 In_eSPI `ORANGE` macro (0xFDA0).
+  const uint16_t LV_ORANGE = 0xFD20;
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
 
   // ── LV CHIP ─────────────────────────────────────────────────────
+  // Orange pill chip per the design, with black text for contrast (the chip
+  // colour is fixed orange rather than the per-character body tint so the
+  // level badge reads the same across every buddy palette).
   int y = 88;
-  spr.fillRoundRect(6, y, 46, 18, 3, p.body);
+  spr.fillRoundRect(6, y, 46, 18, 3, LV_ORANGE);
   spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
+  spr.setTextColor(0x0000, LV_ORANGE);
   spr.setCursor(11, y + 5);
   spr.print("LV");
   spr.setTextSize(2);
+  spr.setTextColor(0x0000, LV_ORANGE);
   spr.setCursor(26, y + 2);
   spr.printf("%u", stats().level);
   spr.setTextSize(1);
