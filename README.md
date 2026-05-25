@@ -89,6 +89,19 @@ version of this showcase is published via GitHub Pages (see
   <img src="docs/screens.png" alt="gr0m Developer Hardware Buddy — redesigned device screens and character states" width="660">
 </p>
 
+### Evolution
+
+gr0m assembles itself as your lifetime token usage grows — a new stage every
+~250K tokens — ending in the Stage-5 "human disguise" (a robot unconvincingly
+cosplaying a person). The PET screen's **Evolution** page cycles through every
+stage live on the device. The lineup below is rendered pixel-exact off-device by
+[`tools/render`](tools/render), which compiles the real character code against
+host stubs.
+
+<p align="center">
+  <img src="docs/evolution.png" alt="gr0m evolution stages 0–5: Core, Frame, Powered, Persona, HUD, Ascended" width="900">
+</p>
+
 ## Hardware
 
 The firmware targets ESP32 with the Arduino framework. As written, it
