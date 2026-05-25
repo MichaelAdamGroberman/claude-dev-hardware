@@ -1084,25 +1084,39 @@ static void drawLaptop(uint32_t t) {
   if ((t / 2) & 1) _t->fillRect(sx + pkS(14), sy + pkS(8), 2, 1, SPECULAR);
 }
 
-// Speech bubble pointing at gr0m's head. White rounded rect with black
-// outline and a tail. Text rendered in `textColor`. Position auto-clamps
-// to keep the bubble inside the 135px-wide screen, even with long text.
+// Speech bubble floating above gr0m's head. White rounded rect with black
+// outline and a tail that always points back down at the head. Text rendered
+// in `textColor`. The bubble is CENTERED over the head and clamped to stay
+// fully on the 135px screen (and below the top edge), and its tail tracks the
+// head center so it reads as the bot's own speech even when the body is the
+// shrunk peek figure.
 static void drawSpeechBubble(const char* text, uint16_t textColor) {
   int len = 0; while (text[len]) len++;
   int w = len * 6 + 6;
-  // Place to the upper-right of the head, but clamp so right edge ≤ 134.
-  int x = pkX(HX + 30);
+  int h = 12;
+  int headX = pkX(HX);                 // who's talking — head center
+  // Center the bubble over the head, then clamp horizontally on screen.
+  int x = headX - w / 2;
   if (x + w > 134) x = 134 - w;
   if (x < 1) x = 1;
-  int y = pkY(HY - 28);
+  // Sit the bubble above the head, but never let it (or its tail anchor) clip
+  // off the top — leave room for the 4px tail beneath the body.
+  int y = pkY(HY - HH / 2) - h - 6;
   if (y < 1) y = 1;
   // body
-  _t->fillRoundRect(x, y, w, 12, 2, SPECULAR);
-  _t->drawRoundRect(x, y, w, 12, 2, INK);
-  // tail (always points left-down toward the head)
-  _t->fillTriangle(x + 3, y + 11, x + 9, y + 11, x, y + 16, SPECULAR);
-  _t->drawLine(x + 3, y + 11, x, y + 16, INK);
-  _t->drawLine(x + 9, y + 11, x, y + 16, INK);
+  _t->fillRoundRect(x, y, w, h, 2, SPECULAR);
+  _t->drawRoundRect(x, y, w, h, 2, INK);
+  // Tail — a small wedge under the body that points at the head center,
+  // clamped to stay attached to the bubble so it never detaches/floats.
+  int tipX = headX;
+  if (tipX < x + 3) tipX = x + 3;
+  if (tipX > x + w - 3) tipX = x + w - 3;
+  int baseL = tipX - 3, baseR = tipX + 3;
+  if (baseL < x + 1) baseL = x + 1;
+  if (baseR > x + w - 1) baseR = x + w - 1;
+  _t->fillTriangle(baseL, y + h - 1, baseR, y + h - 1, tipX, y + h + 4, SPECULAR);
+  _t->drawLine(baseL, y + h - 1, tipX, y + h + 4, INK);
+  _t->drawLine(baseR, y + h - 1, tipX, y + h + 4, INK);
   // text
   _t->setTextSize(1);
   _t->setTextColor(textColor, SPECULAR);
@@ -1352,31 +1366,42 @@ static void drawFedora() {
 // disguise is the headline final look, so it wins the conflict).
 static void drawHumanGlasses() {
   if (!frontFaceVisible()) return;
-  // Two rounded-rectangle lenses sitting over the visor band (y≈-1).
-  V2 lTL = onFace(-19, -6);  V2 lBR = onFace(-3, 4);
-  V2 rTL = onFace(  3, -6);  V2 rBR = onFace(19, 4);
-  // Left lens
-  _t->fillRect(lTL.x, lTL.y, lBR.x - lTL.x, lBR.y - lTL.y, INK);
-  _t->drawRect(lTL.x - 1, lTL.y - 1, (lBR.x - lTL.x) + 2, (lBR.y - lTL.y) + 2, STEEL);
-  _t->drawRect(lTL.x, lTL.y, lBR.x - lTL.x, lBR.y - lTL.y, STEEL);
-  // Right lens
-  _t->fillRect(rTL.x, rTL.y, rBR.x - rTL.x, rBR.y - rTL.y, INK);
-  _t->drawRect(rTL.x - 1, rTL.y - 1, (rBR.x - rTL.x) + 2, (rBR.y - rTL.y) + 2, STEEL);
-  _t->drawRect(rTL.x, rTL.y, rBR.x - rTL.x, rBR.y - rTL.y, STEEL);
+  // Big round "thick studious nerd" lenses sitting over the visor band. Round
+  // (not square) reads more comically + separates cleanly from the straight
+  // mustache below. Sized in raw px so they shrink on the mini via pkS().
+  V2 cL = onFace(-10, -4);   // left lens center (raised so the 'stache clears)
+  V2 cR = onFace( 10, -4);   // right lens center
+  int r = pkS(8); if (r < 3) r = 3;
+  // White "googly" lens fill so the eyes read as a disguise, not the bot's
+  // own black shades — the over-eager human look. Dark heavy frame around.
+  _t->fillCircle(cL.x, cL.y, r, SPECULAR);
+  _t->fillCircle(cR.x, cR.y, r, SPECULAR);
+  _t->drawCircle(cL.x, cL.y, r,     HAT_BAND);
+  _t->drawCircle(cL.x, cL.y, r + 1, HAT_BAND);
+  _t->drawCircle(cR.x, cR.y, r,     HAT_BAND);
+  _t->drawCircle(cR.x, cR.y, r + 1, HAT_BAND);
+  // Tiny dark "pupils" behind the lenses, parallax-shifted, so the disguise
+  // has shifty little eyes peering through.
+  int pr = pkS(2); if (pr < 1) pr = 1;
+  V2 pL = onFace(-10 + (float)_tiltX * 0.6f, -3);
+  V2 pR = onFace( 10 + (float)_tiltX * 0.6f, -3);
+  _t->fillCircle(pL.x, pL.y, pr, INK);
+  _t->fillCircle(pR.x, pR.y, pr, INK);
   // Heavy nose bridge between the lenses.
-  V2 brL = onFace(-3, -2);
-  V2 brR = onFace( 3, -2);
-  _t->drawLine(brL.x, brL.y, brR.x, brR.y, STEEL);
-  _t->drawLine(brL.x, brL.y + 1, brR.x, brR.y + 1, STEEL);
-  // Temple arms running back toward the ears (track parallax slightly).
-  V2 tL = onFace(-25, -3);
-  V2 tR = onFace( 25, -3);
-  _t->drawLine(lTL.x - 1, brL.y, tL.x, tL.y, STEEL);
-  _t->drawLine(rBR.x + 1, brR.y, tR.x, tR.y, STEEL);
-  // Single specular glint so the lenses read as glass, parallax-shifted.
-  V2 gl = onFace(-16 + (float)_tiltX, -4);
-  _t->drawPixel(gl.x, gl.y, SPECULAR);
-  _t->drawPixel(gl.x + 1, gl.y, SPECULAR);
+  V2 brL = onFace(-2, -4);
+  V2 brR = onFace( 2, -4);
+  _t->drawLine(brL.x, brL.y, brR.x, brR.y, HAT_BAND);
+  _t->drawLine(brL.x, brL.y + 1, brR.x, brR.y + 1, HAT_BAND);
+  // Temple arms running back toward the ears.
+  V2 tL = onFace(-24, -6);
+  V2 tR = onFace( 24, -6);
+  _t->drawLine(cL.x - r, cL.y - 1, tL.x, tL.y, HAT_BAND);
+  _t->drawLine(cR.x + r, cR.y - 1, tR.x, tR.y, HAT_BAND);
+  // Specular glints so the lenses read as glass, parallax-shifted.
+  V2 gL = onFace(-13 + (float)_tiltX, -7);
+  V2 gR = onFace(  7 + (float)_tiltX, -7);
+  _t->drawPixel(gL.x, gL.y, 0x52AA);
+  _t->drawPixel(gR.x, gR.y, 0x52AA);
 }
 
 // The "tell" — gr0m periodically over-acts being human with a flat speech
@@ -1392,34 +1417,47 @@ static void drawHumanTell(uint32_t t) {
   } else if (phase == 2) {
     drawSpeechBubble("I AM NORMAL", INK);
   }
-  // Stiff fake smile under the glasses — a too-wide flat grin on the front
-  // face. Only when the face is toward us, like the other face decorations.
+  // Stiff fake smile BELOW the mustache (mustache bottom ≈ y13) — a too-wide
+  // flat grin with corners hitched up, on the front face. Only when the face
+  // is toward us, like the other face decorations.
   if (!frontFaceVisible()) return;
-  V2 sL = onFace(-9, 15);
-  V2 sR = onFace( 9, 15);
-  V2 cL = onFace(-9, 12);    // corners hitched up — forced smile
-  V2 cR = onFace( 9, 12);
+  V2 sL = onFace(-8, 17);
+  V2 sR = onFace( 8, 17);
+  V2 cL = onFace(-9, 15);    // corners hitched up — forced smile
+  V2 cR = onFace( 9, 15);
   _t->drawLine(sL.x, sL.y, sR.x, sR.y, CHASSIS_SH);
+  _t->drawLine(sL.x, sL.y - 1, sR.x, sR.y - 1, CHASSIS_SH);
   _t->drawLine(sL.x, sL.y, cL.x, cL.y, CHASSIS_SH);
   _t->drawLine(sR.x, sR.y, cR.x, cR.y, CHASSIS_SH);
 }
 
 // Comically oversized fake mustache — the disguise's loudest "tell": a fat
-// black Groucho bush across the lower face, just under the glasses, with
-// upturned curled tips and a tiny chassis notch under the nose.
+// black Groucho bush sitting clearly BELOW the glasses (with a chassis gap so
+// it doesn't merge into the lenses), swooping up into curled tips at both
+// ends, split by a notch under the nose so the two halves read as a 'stache.
 static void drawFakeMustache() {
   if (!frontFaceVisible()) return;
-  V2 tl = onFace(-15, 6),  tr = onFace(15, 6);
-  V2 bl = onFace(-12, 12), br = onFace(12, 12);
-  _t->fillTriangle(tl.x, tl.y, tr.x, tr.y, br.x, br.y, INK);
-  _t->fillTriangle(tl.x, tl.y, br.x, br.y, bl.x, bl.y, INK);
-  // Upturned curled tips beyond the main bush.
-  V2 lt = onFace(-20, 3), rt = onFace(20, 3);
-  _t->fillTriangle(tl.x, tl.y, lt.x, lt.y, bl.x, bl.y, INK);
-  _t->fillTriangle(tr.x, tr.y, rt.x, rt.y, br.x, br.y, INK);
-  // Tiny notch of chassis under the nose so the two halves read.
-  V2 nb = onFace(0, 6), nd = onFace(0, 9);
-  _t->drawLine(nb.x, nb.y, nd.x, nd.y, CHASSIS);
+  // Main bush — a wide, fat slab. Top at y=8 (clear of the lens bottoms ~y=4,
+  // lenses centered at y=-4 with r=8), bottom at y=13. Two halves + a notch.
+  // Left half.
+  V2 lOut = onFace(-16, 8);    // outer-top, where the tip will curl up from
+  V2 lTop = onFace( -2, 9);    // inner-top (near the notch)
+  V2 lBot = onFace( -3, 13);   // inner-bottom
+  V2 lLow = onFace(-13, 13);   // outer-bottom
+  _t->fillTriangle(lOut.x, lOut.y, lTop.x, lTop.y, lBot.x, lBot.y, INK);
+  _t->fillTriangle(lOut.x, lOut.y, lBot.x, lBot.y, lLow.x, lLow.y, INK);
+  // Right half (mirror).
+  V2 rOut = onFace( 16, 8);
+  V2 rTop = onFace(  2, 9);
+  V2 rBot = onFace(  3, 13);
+  V2 rLow = onFace( 13, 13);
+  _t->fillTriangle(rOut.x, rOut.y, rTop.x, rTop.y, rBot.x, rBot.y, INK);
+  _t->fillTriangle(rOut.x, rOut.y, rBot.x, rBot.y, rLow.x, rLow.y, INK);
+  // Curled-up handlebar tips sweeping above the bush at both ends.
+  V2 lTip = onFace(-21, 4), lj = onFace(-15, 6);
+  V2 rTip = onFace( 21, 4), rj = onFace( 15, 6);
+  _t->fillTriangle(lOut.x, lOut.y, lj.x, lj.y, lTip.x, lTip.y, INK);
+  _t->fillTriangle(rOut.x, rOut.y, rj.x, rj.y, rTip.x, rTip.y, INK);
 }
 
 // One-call composite for the Stage-5 disguise everyday look. Order matters:
