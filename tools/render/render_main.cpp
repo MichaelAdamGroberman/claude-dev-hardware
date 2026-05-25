@@ -13,6 +13,11 @@
 static const int SW = 135, SH = 240;
 static uint16_t FB[SW * SH];
 
+// Standalone scene entry points exposed by gr0m.cpp (outside its namespace),
+// mirroring how the firmware's main loop drives them. stage 9 = alt
+// human-costume easter egg.
+extern void gr0mRenderHumanCostume(TFT_eSPI* tgt, uint32_t t);
+
 // Globals normally owned by main.cpp.
 TFT_eSprite spr;
 _M5Device   M5;
@@ -48,8 +53,18 @@ int main(int argc, char** argv) {
   buddySetPeek(scale == 1);
   for (int i = 0; i < SW * SH; i++) FB[i] = 0x0000;   // device bg = black
   buddyInvalidate();
-  // Advance the fake clock so buddyTick ticks the animation up to `frame`.
-  for (int i = 0; i <= frame; i++) { _grender_clock_ms = (unsigned long)i * 200UL; buddyTick((uint8_t)state); }
+  if (stage == 9) {
+    // Preview the alt human-costume easter egg directly via its standalone
+    // entry point (mirrors how the firmware loop calls it), bypassing
+    // buddyTick / the mood-state table. Advance the fake clock so the mouth
+    // twitch + steam animate up to `frame`.
+    _grender_clock_ms = (unsigned long)frame * 200UL;
+    spr.fillSprite(0x0000);
+    gr0mRenderHumanCostume(&spr, (uint32_t)_grender_clock_ms);
+  } else {
+    // Advance the fake clock so buddyTick ticks the animation up to `frame`.
+    for (int i = 0; i <= frame; i++) { _grender_clock_ms = (unsigned long)i * 200UL; buddyTick((uint8_t)state); }
+  }
   writePPM(out);
   return 0;
 }
