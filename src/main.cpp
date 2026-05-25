@@ -59,7 +59,11 @@ enum DisplayMode { DISP_NORMAL, DISP_PET, DISP_INFO, DISP_COUNT };
 uint8_t displayMode = DISP_NORMAL;
 uint8_t infoPage = 0;
 uint8_t petPage = 0;
-const uint8_t PET_PAGES = 2;
+// Pet pages: 0 = stats, 1 = how-to, 2 = evolution showcase. The showcase page
+// cycles the DISPLAYED evolution stage 0..5 so the character shows off every
+// upgrade it has unlocked (and previews what's still coming).
+const uint8_t PET_PAGES = 3;
+const uint8_t PET_PG_SHOWCASE = 2;
 uint8_t msgScroll = 0;
 uint16_t lastLineGen = 0;
 char     lastPromptId[40] = "";
@@ -76,6 +80,33 @@ bool     buddyMode = false;
 uint8_t  g_evoStage   = 0;   // = evoStage()
 uint32_t g_dispTokens = 0;   // = stats().tokens (period figure for the chest-LCD)
 bool     gifAvailable = false;
+
+// Evolution showcase: a non-destructive demo (Pet page PET_PG_SHOWCASE) that
+// walks the DISPLAYED stage 0..5 so the character shows off everything it has
+// unlocked and previews what's coming. It only OVERRIDES the g_evoStage mirror
+// that gr0m.cpp renders from; it never touches the persisted lifetimeTokens /
+// real evoStage(). The mirror is re-derived from evoStage() every loop (see the
+// "refresh the mirrors" line in loop()), so leaving the page restores truth for
+// free. SHOWCASE_HOLD_MS is the dwell per stage (~1.5s) before advancing.
+const uint32_t SHOWCASE_HOLD_MS = 1500;
+static uint32_t showcaseStartMs = 0;   // millis() when the showcase page was entered
+// Human-readable stage names, matching the gr0m.cpp render comments:
+//   0 Core, 1 Frame, 2 Powered, 3 Persona, 4 HUD, 5 Ascended.
+static const char* const EVO_STAGE_NAMES[6] = {
+  "Core", "Frame", "Powered", "Persona", "HUD", "Ascended"
+};
+// Stage the showcase is currently displaying, derived purely from elapsed time
+// since the page was entered. Loops 0..5 → 0..5 forever.
+static inline uint8_t showcaseStage() {
+  uint32_t elapsed = millis() - showcaseStartMs;
+  return (uint8_t)((elapsed / SHOWCASE_HOLD_MS) % 6);
+}
+// True while the Pet showcase page owns the g_evoStage mirror. The caller in
+// loop() additionally requires no overlay menu to be open (those bools are
+// declared further down) before applying the override.
+static inline bool showcasePageActive() {
+  return displayMode == DISP_PET && petPage == PET_PG_SHOWCASE && !menuOpen;
+}
 const uint8_t SPECIES_GIF = 0xFF;   // species NVS sentinel: use the installed GIF
 
 // Cycle GIF (if installed) → ASCII species 0..N-1 → GIF. Persisted to the
@@ -1445,9 +1476,54 @@ static void drawPetHowTo(const Palette& p) {
   ln(p.textDim, "hold A: menu");
 }
 
+// Evolution showcase overlay (Pet page PET_PG_SHOWCASE). The character itself
+// is rendered behind us (peeked) with g_evoStage transiently set to the cycling
+// showcase stage in loop(), so the body / antenna / shades / HUD / disguise pop
+// in and out as the demo walks 0..5. We only draw chrome: a compact bottom band
+// with a "Stage N/5" pill, the stage name, and a 6-segment progress strip. The
+// upper region is left untouched so the showing-off character is fully visible.
+static void drawPetShowcase(const Palette& p) {
+  uint8_t s = showcaseStage();          // 0..5, matches the overridden g_evoStage
+
+  // Bottom band only — keep the character region clear.
+  const int BAND_H = 46;
+  const int by = H - BAND_H;
+  spr.fillRect(0, by, W, BAND_H, p.bg);
+  spr.drawFastHLine(0, by, W, p.textDim);
+
+  // "Stage N/5" pill (left) + stage name (right).
+  int ty = by + 6;
+  spr.fillRoundRect(4, ty, 56, 16, 3, p.body);
+  spr.setTextSize(1);
+  spr.setTextColor(p.bg, p.body);
+  spr.setCursor(9, ty + 4);
+  spr.printf("Stage %u/5", s);
+
+  spr.setTextColor(p.text, p.bg);
+  const char* name = EVO_STAGE_NAMES[s <= 5 ? s : 5];
+  spr.setCursor(W - 4 - (int)strlen(name) * 6, ty + 4);
+  spr.print(name);
+
+  // 6-segment progress strip: filled = stages reached so far this cycle, the
+  // current one highlighted, the rest dim (a "still to come" preview).
+  int sy = by + 28;
+  int segW = (W - 8) / 6;
+  for (uint8_t i = 0; i <= 5; i++) {
+    int sx = 4 + i * segW;
+    if (i == s)      spr.fillRect(sx, sy, segW - 2, 10, p.body);
+    else if (i < s)  spr.fillRect(sx, sy, segW - 2, 10, p.text);
+    else             spr.drawRect(sx, sy, segW - 2, 10, p.textDim);
+  }
+}
+
 void drawPet() {
   const Palette& p = characterPalette();
   int y = 70;
+
+  // The showcase page draws only a bottom chrome band over the peeked,
+  // stage-cycling character — no full-screen page, no top title row (which
+  // would otherwise cover the character's head as it shows off each form).
+  if (petPage == PET_PG_SHOWCASE) { drawPetShowcase(p); return; }
 
   if (petPage == 0) drawPetStats(p);
   else drawPetHowTo(p);
@@ -2059,6 +2135,9 @@ void loop() {
     } else if (displayMode == DISP_PET) {
       beep(2400, 30);
       petPage = (petPage + 1) % PET_PAGES;
+      // Entering the evolution showcase restarts the cycle at Stage 0 so it
+      // always opens on the base form and walks up from there.
+      if (petPage == PET_PG_SHOWCASE) showcaseStartMs = millis();
       applyDisplayMode();
     } else {
       beep(2400, 30);
@@ -2075,6 +2154,16 @@ void loop() {
   clockRefreshRtc();   // 1Hz internal throttle; also caches _onUsb
   g_evoStage   = evoStage();      // refresh the mirrors gr0m.cpp renders from
   g_dispTokens = stats().tokens;
+
+  // Evolution showcase override. The mirror above was just reset to the TRUE
+  // evoStage(); here we transiently retarget it to the showcase's cycling
+  // stage so buddyTick() (which runs below, reading g_evoStage) draws each
+  // upgrade in turn. Because this is reapplied from truth every loop, simply
+  // leaving the page — or opening a menu over it — restores the real stage on
+  // the very next frame. No persistence, no statsSetTokens, nothing touched.
+  bool showcasing = showcasePageActive() && !settingsOpen && !connOpen
+                 && !usageOpen && !resetOpen && !inPrompt;
+  if (showcasing) g_evoStage = showcaseStage();
 
   // Stage-5 DJ-unlock announce (one-time per boot). statsSetTokens latches
   // _djUnlocked the first time the character reaches Stage 5; when we observe
