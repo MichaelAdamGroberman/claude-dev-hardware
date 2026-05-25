@@ -61,10 +61,21 @@ for setup details see **[tools/cc-bridge/README.md](tools/cc-bridge/README.md)**
   **adapter mode** — which turns the device into a dedicated GPIO probe.
 - **Token-usage reporting on the device.** The daemon computes output-token
   usage over a configurable window (day / week / month / all) from your Claude
-  Code transcripts and pushes it to the device for display.
+  Code transcripts and pushes it to the device for display. Approvals and
+  denials are tracked per period alongside it.
+- **Character evolution + on-device menus.** The gr0m mascot assembles itself
+  across five lifetime-usage milestones (1M → 250M tokens) — from a bare head to
+  the full rig (flat-shaded early, dynamically lit once mature). On-device
+  menus, opened with a long-press of **A** on the matching info page, cover a
+  **Connection** screen (WiFi / BT / Off / Adapter) and a **Usage** screen
+  (reporting window, plus reset-counters and reset-buddy-level).
+- **DJ mode** — a bonus full-detail scene (turntables, mixer, VU-meter visor,
+  headphones, note particles on an internal beat), toggled from Settings or
+  `{"cmd":"dj"}` / the `gr0m_dj` MCP tool; unlocked as the reward for reaching
+  the final evolution stage.
 
-> **Roadmap:** see [docs/superpowers/specs/](docs/superpowers/specs/) for design
-> notes on not-yet-implemented features.
+> **Design notes:** [docs/superpowers/specs/](docs/superpowers/specs/) has the
+> full evolution / DJ / menu design spec.
 
 ## Hardware
 

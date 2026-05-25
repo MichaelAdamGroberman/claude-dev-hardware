@@ -143,6 +143,15 @@ Tools:
 | `gr0m_adc_read` | `pin` | analog read → raw (0-4095) + mV |
 | `gr0m_logic_capture` | `pin`, `samples`, `interval_us` | mini logic-analyzer trace |
 | `gr0m_adapter` | `on` = `true`\|`false` | adapter mode: dedicate the device to GPIO probing |
+| `gr0m_dj` | `on` = `true`\|`false` | DJ-booth scene (decks/mixer/VU visor on an internal beat); mutually exclusive with adapter mode |
+| `gr0m_level_reset` | — | reset the buddy's lifetime level → de-evolve to Stage 0 |
+
+`gr0m_status` now also reports `level`, `evoStage` (0–5), `lifetimeTokens`,
+`periodTokens`, and `approved`/`denied` for the current window. `gr0m_token_reset`
+clears the approved/denied tally along with the token counter. The same controls
+(reporting window, reset counters, reset level) are available on-device in the
+**Usage** menu, and radio/adapter in the **Connection** menu (long-press **A** on
+the matching info page).
 
 ### GPIO / logic analyzer
 
