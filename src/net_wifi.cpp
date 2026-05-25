@@ -90,14 +90,15 @@ static void startPortal() {
   Serial.printf("[wifi] startPortal() heap=%u\n", (unsigned)ESP.getFreeHeap());
 
   // BLE and WiFi share the single 2.4 GHz radio, and the BLE stack also
-  // holds ~30-40 KB of heap. With BLE advertising active, softAP often
-  // fails to allocate / get radio time (the "BLE coex?" failure). Pause
-  // BLE advertising while the config portal is up — it's a one-time
-  // setup step. BLE resumes on the next boot into STA mode, where
-  // STA + BLE coexist fine.
-  bleAdvertisingStop();
+  // holds ~30-40 KB of heap. With BLE active, softAP often fails to
+  // allocate / get radio time (the "BLE coex?" failure). The radio is
+  // WiFi XOR BLE: fully suspend BLE while the AP portal is up. Unlike a
+  // plain advertising-stop, bleSetSuspended() also drops any live
+  // connection and ignores incoming RX, so a still-paired peer can't keep
+  // injecting commands while the AP owns the radio.
+  bleSetSuspended(true);
   delay(200);
-  Serial.printf("[wifi] BLE adv paused for portal, heap=%u\n",
+  Serial.printf("[wifi] BLE suspended for portal, heap=%u\n",
                 (unsigned)ESP.getFreeHeap());
 
   // Retry softAP up to 5× — the radio scheduler usually settles within
@@ -176,6 +177,15 @@ void netWifiInit() {
     strncpy(_ip, "(off)", sizeof(_ip));
     return;
   }
+
+  // Radio mutex: WiFi is enabled, so it owns the single 2.4 GHz radio for
+  // this boot. Suspend BLE up front (drops RX + advertising + any live link)
+  // so no command can arrive over BLE while WiFi is active — true WiFi XOR
+  // BLE. Serial is a separate UART and stays live. In practice BLE was never
+  // init'd in WiFi mode (setup() gates startBt() on !wifi), but suspending
+  // here is the belt-and-braces guarantee regardless of init order, and it
+  // also covers the STA→portal fallback path inside this same boot.
+  bleSetSuspended(true);
 
   // Load the saved network list (wifi_ssid0.., wifi_pwd0.., count wifi_n).
   // Fall back to the legacy single-slot keys (wifi_ssid/wifi_pwd) so a
@@ -266,6 +276,11 @@ void netWifiStop() {
   WiFi.mode(WIFI_OFF);
   _state = NW_OFF;
   strncpy(_ip, "(off)", sizeof(_ip));
+  // Radio mutex: WiFi released the radio. Resume BLE so it can advertise and
+  // receive again. (In practice the radio switch goes through a reboot via
+  // applyConn(), but releasing the suspend here keeps the invariant honest if
+  // WiFi is ever stopped without one.)
+  bleSetSuspended(false);
 }
 
 void netWifiTick() {
@@ -309,3 +324,7 @@ bool netWifiPortalActive()  { return _portalRunning; }
 const char* netWifiIP()     { return _ip; }
 const char* netWifiBridgeAddr() { return _bridge; }
 const char* netWifiLastError() { return _lastErr; }
+// Live count of stations associated to the setup AP. Read at draw time by the
+// CONNECTIONS screen so a phone joining the portal shows up immediately. 0
+// when the AP isn't running.
+int netWifiApClients() { return _portalRunning ? (int)WiFi.softAPgetStationNum() : 0; }

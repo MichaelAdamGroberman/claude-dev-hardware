@@ -31,3 +31,4 @@ bool        netWifiPortalActive(); // true when AP-config portal is up
 const char* netWifiIP();           // current IP as printable string
 const char* netWifiBridgeAddr();   // configured Mac-bridge "host:port", "" if none
 const char* netWifiLastError();    // most recent failure reason, "" if none
+int         netWifiApClients();    // # stations associated to the setup AP (live)

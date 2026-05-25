@@ -44,3 +44,14 @@ void bleInjectRx(const uint8_t* data, size_t len);
 void bleAdvertisingStart();
 void bleAdvertisingStop();
 bool bleAdvertising();
+
+// Radio mutex — the 2.4 GHz radio is WiFi XOR BLE (serial always on).
+// Suspending BLE stops advertising AND drops every byte that arrives over
+// the RX characteristic, so a still-connected peer can't keep injecting
+// commands while WiFi (AP/portal/STA) owns the radio. It also force-drops
+// any live connection so the link can't continue receiving. This is a
+// stronger guarantee than bleAdvertisingStop() alone, which leaves an
+// existing connection live. Resuming re-enables RX and advertising.
+// bleSuspended() lets callers (e.g. dataPoll) skip draining the ring.
+void bleSetSuspended(bool suspended);
+bool bleSuspended();

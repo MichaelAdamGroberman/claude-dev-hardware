@@ -220,8 +220,12 @@ inline void dataPoll(TamaState* out) {
   }
 
   _usbLine.feed(Serial, out);
-  // BLE ring buffer is drained manually since it's not a Stream.
-  while (bleAvailable()) {
+  // BLE ring buffer is drained manually since it's not a Stream. Skip it
+  // entirely while BLE is suspended for the radio mutex (WiFi owns the
+  // radio) — rxPush() already drops new bytes, but this also flushes any
+  // residual ring contents and avoids dispatching a stale half-line. Serial
+  // (above) is a separate UART and is never gated.
+  while (!bleSuspended() && bleAvailable()) {
     int c = bleRead();
     if (c < 0) break;
     _lastBtByteMs = millis();

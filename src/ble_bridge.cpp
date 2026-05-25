@@ -28,8 +28,16 @@ static volatile bool      secure = false;
 static volatile uint32_t  passkey = 0;
 static volatile uint16_t  mtu = 23;
 static volatile uint16_t  connHandle = BLE_HS_CONN_HANDLE_NONE;
+// Radio mutex: when suspended, the RX path drops every incoming byte so a
+// still-connected peer can't keep feeding commands while WiFi owns the
+// radio. Set via bleSetSuspended() from the radio-mode logic.
+static volatile bool      suspended = false;
+// Advertising state — declared here (above ServerCallbacks) because the
+// onDisconnect callback reads/writes it for the radio-mutex guard.
+static bool _advertising = true;
 
 static void rxPush(const uint8_t* p, size_t n) {
+  if (suspended) return;   // radio mutex — WiFi owns the radio; ignore BLE RX
   for (size_t i = 0; i < n; i++) {
     size_t next = (rxHead + 1) % RX_CAP;
     if (next == rxTail) return;  // full — drop (upstream should keep up)
@@ -81,8 +89,14 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     mtu = 23;
     connHandle = BLE_HS_CONN_HANDLE_NONE;
     Serial.printf("[ble] disconnected (reason=0x%x)\n", reason);
-    // Restart advertising so the next client can find us.
+    // Restart advertising so the next client can find us — UNLESS BLE is
+    // suspended for the radio mutex (WiFi owns the radio). Without this guard,
+    // bleSetSuspended(true)'s forced disconnect would land here and immediately
+    // re-advertise, defeating the mutex. _advertising is updated to match so
+    // bleAdvertising() stays truthful.
+    if (suspended) { _advertising = false; return; }
     NimBLEDevice::startAdvertising();
+    _advertising = true;
   }
   void onMTUChange(uint16_t newMtu, NimBLEConnInfo& /*info*/) override {
     mtu = newMtu;
@@ -150,23 +164,49 @@ void bleClearBonds() {
   Serial.println("[ble] cleared all bonds");
 }
 
-static bool _advertising = true;
-
 void bleAdvertisingStart() {
+  // Radio mutex: refuse to advertise while BLE is suspended (WiFi owns the
+  // radio). bleSetSuspended(false) clears `suspended` before it calls in
+  // here, so the legitimate resume path still works.
+  if (suspended) return;
   if (_advertising) return;
-  NimBLEDevice::startAdvertising();
+  // `server` is non-null only after bleInit() — in WiFi-only boots the stack
+  // is never initialized, so guard the NimBLE call to avoid touching an
+  // uninitialized host.
+  if (server) NimBLEDevice::startAdvertising();
   _advertising = true;
   Serial.println("[ble] advertising started");
 }
 
 void bleAdvertisingStop() {
   if (!_advertising) return;
-  NimBLEDevice::stopAdvertising();
+  if (server) NimBLEDevice::stopAdvertising();   // no-op if stack not up
   _advertising = false;
   Serial.println("[ble] advertising stopped");
 }
 
 bool bleAdvertising() { return _advertising; }
+
+void bleSetSuspended(bool s) {
+  if (suspended == s) return;
+  suspended = s;
+  if (s) {
+    // Stop advertising so no new central can attach, and force-drop any live
+    // connection so an already-paired peer can't keep writing commands while
+    // WiFi owns the radio. rxPush() also short-circuits while suspended, so
+    // even an in-flight write is dropped rather than dispatched.
+    bleAdvertisingStop();
+    if (server && connHandle != BLE_HS_CONN_HANDLE_NONE) {
+      server->disconnect(connHandle);
+    }
+    Serial.println("[ble] suspended (radio handed to WiFi)");
+  } else {
+    bleAdvertisingStart();
+    Serial.println("[ble] resumed (radio back to BLE)");
+  }
+}
+
+bool bleSuspended() { return suspended; }
 
 size_t bleAvailable() {
   return (rxHead + RX_CAP - rxTail) % RX_CAP;
