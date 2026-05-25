@@ -1,0 +1,5 @@
+# Build artifacts from the off-device character renderer
+gr0m_render
+*.o
+*.ppm
+*.png
