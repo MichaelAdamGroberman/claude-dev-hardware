@@ -215,7 +215,10 @@ def main() -> int:
         sock.close()
 
     decision = reply.get("decision", "")
-    if decision == "once":
+    if decision in ("once", "always"):
+        # "always" can't install a permanent rule from a hook, so it behaves
+        # like "once" here (allow this call) instead of falling through to a
+        # second terminal prompt.
         # Current Claude Code PreToolUse contract: hookSpecificOutput /
         # permissionDecision. The old top-level {"decision":"approve"} is
         # DEPRECATED and silently ignored on recent versions — which is why

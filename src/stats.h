@@ -113,18 +113,12 @@ inline void statsOnBridgeTokens(uint32_t bridgeTotal) {
   _lastBridgeTokens = bridgeTotal;
   if (delta == 0) return;
 
-  uint8_t lvlBefore = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
+  // Period display only. Level + lifetime are owned authoritatively by
+  // statsSetTokens (the {"cmd":"tokens"} push carrying set/life), which also
+  // fires the level-up celebration. Deriving level from the PERIOD counter
+  // here set a wrong, period-based level and persisted a stale lifetimeTokens,
+  // so this path no longer touches level/lifetime/NVS.
   _stats.tokens += delta;
-  uint8_t lvlAfter = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
-
-  // Heartbeats are timer-driven telemetry — don't wear NVS on every delta.
-  // Tokens accumulate in RAM, persist only on the milestone. Worst case on
-  // hard power-off: lose up to 50K tokens of progress.
-  if (lvlAfter > lvlBefore) {
-    _stats.level = lvlAfter;
-    _levelUpPending = true;
-    _dirty = true; statsSave();
-  }
 }
 
 inline bool statsPollLevelUp() {

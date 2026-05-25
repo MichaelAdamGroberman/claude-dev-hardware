@@ -95,6 +95,10 @@ class BuddyLink:
         # overwriting each other's prompt (which left the loser to time out
         # and fall back to the terminal/phone).
         self._prompt_lock = asyncio.Lock()
+        # Serializes ack-style queries (GPIO/ADC/capture). Replies are keyed
+        # only by ack-TYPE, so two concurrent queries with the same ack would
+        # clobber each other's future; the device is single-threaded anyway.
+        self._query_lock = asyncio.Lock()
         self._rx_buf = bytearray()
         self._owner = os.environ.get("BUDDY_OWNER", "CLI")
 
@@ -434,14 +438,15 @@ class BuddyLink:
         (used for GPIO reads / captures that return data)."""
         if not self.is_connected():
             return {"error": "device not connected"}
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._ack_waiters[ack] = fut
-        await self._send_json(cmd)
-        try:
-            return await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
-            self._ack_waiters.pop(ack, None)
-            return {"error": "device timeout"}
+        async with self._query_lock:
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+            self._ack_waiters[ack] = fut
+            await self._send_json(cmd)
+            try:
+                return await asyncio.wait_for(fut, timeout=timeout)
+            except asyncio.TimeoutError:
+                self._ack_waiters.pop(ack, None)
+                return {"error": "device timeout"}
 
     # ── BLE ──────────────────────────────────────────────────────────
 
