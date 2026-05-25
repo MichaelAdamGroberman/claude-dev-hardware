@@ -1890,6 +1890,17 @@ static void djTick(uint32_t now) {
   spr.pushSprite(0, 0);
 }
 
+// Human-costume easter egg — a Stage-5 alternate "unconvincing human" look the
+// user toggles by holding A+B together for 3s on the home screen. Rendered
+// full-screen like the DJ scene; gr0m.cpp owns the drawing.
+bool humanCostumeActive = false;
+extern void gr0mRenderHumanCostume(TFT_eSPI*, uint32_t);
+static void humanCostumeTick(uint32_t now) {
+  spr.fillSprite(TFT_BLACK);
+  gr0mRenderHumanCostume(&spr, now);
+  spr.pushSprite(0, 0);
+}
+
 static void adapterTick(uint32_t now) {
   // On-device exit: BtnB (the top button) leaves adapter mode without a
   // reset, resuming BLE advertising. A reset also returns to pet mode.
@@ -2038,6 +2049,25 @@ void loop() {
     djActive = stage5 && (celebrate || flourish);
   }
   if (djActive) { djTick(now); return; }
+
+  // A+B held together for 3s toggles the human-costume easter egg. Checked
+  // every frame BEFORE the early-return below, so the same gesture also exits.
+  {
+    static uint32_t abHeldSince = 0;
+    if (M5.BtnA.isPressed() && M5.BtnB.isPressed()) {
+      if (abHeldSince == 0) abHeldSince = now;
+      else if (now - abHeldSince >= 3000) {
+        humanCostumeActive = !humanCostumeActive;
+        buddyInvalidate();
+        beep(humanCostumeActive ? 2600 : 1400, 120);
+        swallowBtnA = swallowBtnB = true;  // eat the release so it won't approve/deny/page
+        abHeldSince = 0;
+      }
+    } else {
+      abHeldSince = 0;
+    }
+  }
+  if (humanCostumeActive) { humanCostumeTick(now); return; }
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;
