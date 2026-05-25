@@ -2843,7 +2843,7 @@ void loop() {
     // overlay/menu is open (those carry upright text) and while charging in
     // a cradle. Falls back to the normal upright blit otherwise.
     bool worldUpRot = false;
-    if (settings().worldUp && !resetOpen && !settingsOpen && !connOpen
+    if (settings().worldUp && !inPrompt && !resetOpen && !settingsOpen && !connOpen
         && !usageOpen && !menuOpen && !blePasskey()) {
       float ax, ay, az;
       M5.Imu.getAccelData(&ax, &ay, &az);
@@ -2876,13 +2876,13 @@ void loop() {
     else              faceUpSinceMs = 0;
   }
 
-  if (!napping && faceDownSinceMs && (now - faceDownSinceMs) >= 3000) {
+  if (!inPrompt && !napping && faceDownSinceMs && (now - faceDownSinceMs) >= 3000) {
     napping = true;
     napStartMs = now;
     statsNapBegin();              // capture energy baseline for the 5× refill
     M5.Axp.ScreenBreath(8);
     dimmed = true;
-  } else if (napping && faceUpSinceMs && (now - faceUpSinceMs) >= 1000) {
+  } else if (!inPrompt && napping && faceUpSinceMs && (now - faceUpSinceMs) >= 1000) {
     napping = false;
     statsOnNapEnd((now - napStartMs) / 1000);
     statsOnWake();
