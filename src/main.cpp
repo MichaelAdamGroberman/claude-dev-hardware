@@ -1748,11 +1748,14 @@ void setup() {
     spr.fillSprite(p.bg);
     spr.setTextDatum(MC_DATUM);
     spr.setTextSize(2);
-    if (ownerName()[0]) {
+    if (ownerName()[0] && strcasecmp(ownerName(), petName()) != 0) {
       char line[40];
       snprintf(line, sizeof(line), "%s's", ownerName());
       spr.setTextColor(p.text, p.bg);   spr.drawString(line, W/2, H/2 - 12);
       spr.setTextColor(p.body, p.bg);   spr.drawString(petName(), W/2, H/2 + 12);
+    } else if (ownerName()[0]) {
+      // Owner name == pet name — just the name, no redundant "gr0m's gr0m".
+      spr.setTextColor(p.body, p.bg);   spr.drawString(petName(), W/2, H/2);
     } else {
       // First boot, no owner pushed yet — say hi.
       spr.setTextColor(p.body, p.bg);   spr.drawString("Hello!", W/2, H/2 - 12);
