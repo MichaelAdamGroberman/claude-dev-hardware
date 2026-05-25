@@ -147,10 +147,11 @@ first connect; grant it.
   <img src="docs/hardware-buddy-window.png" alt="Hardware Buddy window with Connect button and folder drop target" width="420">
 </p>
 
-> **Redesign mockup:** a reimagined "maker dashboard" take on this window —
-> live device mirror, today's metrics, a live permission prompt, an activity
-> stream, the character library, and device tools — is in
-> [`docs/buddy-dashboard.html`](docs/buddy-dashboard.html).
+> **Proof-of-concept mockup:** a reimagined "maker dashboard" take on this
+> window — live device mirror, today's metrics, a live permission prompt, an
+> activity stream, the character library, and device tools — is in
+> [`docs/buddy-dashboard.html`](docs/buddy-dashboard.html). This is a static
+> proof-of-concept mockup of the desktop companion, not a real or working app.
 
 Once paired, the bridge auto-reconnects whenever both sides are awake.
 
