@@ -628,6 +628,10 @@ class BuddyLink:
             self._record_decision("approved")
         elif decision in ("deny", "denied", "block"):
             self._record_decision("denied")
+        # Resolved — clear the APPROVE screen promptly. promptId is sticky on
+        # the firmware now, so a successful decision no longer auto-clears via
+        # the next idle frame; without this the approved screen lingers.
+        await self._send_json({"cmd": "clearprompt"})
         return decision
 
     async def heartbeat_loop(self) -> None:
