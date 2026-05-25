@@ -133,9 +133,25 @@ static void sendCmd(const char* json) {
   bleWrite((const uint8_t*)json, n);
   bleWrite((const uint8_t*)"\n", 1);
 }
-const uint8_t INFO_PAGES = 6;
+
+// Emit a device→daemon event line over Serial + BLE (mirrors _xAck in
+// xfer.h). The daemon reads these device→host lines and acts on them; the
+// Usage menu uses it for the period / token_reset / level_reset controls.
+//   sendEvt("period", "\"value\":\"week\"")  → {"evt":"period","value":"week"}
+//   sendEvt("token_reset", nullptr)         → {"evt":"token_reset"}
+static void sendEvt(const char* evt, const char* extraJson) {
+  char b[80];
+  int len = (extraJson && *extraJson)
+    ? snprintf(b, sizeof(b), "{\"evt\":\"%s\",%s}\n", evt, extraJson)
+    : snprintf(b, sizeof(b), "{\"evt\":\"%s\"}\n", evt);
+  Serial.write(b, len);
+  bleWrite((const uint8_t*)b, len);
+}
+const uint8_t INFO_PAGES = 7;
 const uint8_t INFO_PG_BUTTONS = 1;
-const uint8_t INFO_PG_CREDITS = 5;
+const uint8_t INFO_PG_CONNECTIONS = 4;
+const uint8_t INFO_PG_USAGE = 5;
+const uint8_t INFO_PG_CREDITS = 6;
 
 void applyDisplayMode() {
   bool peek = displayMode != DISP_NORMAL;
@@ -154,9 +170,33 @@ const uint8_t MENU_N = 6;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
-const char* settingsItems[] = { "brightness", "sound", "bluetooth", "wifi", "led", "mic claps", "transcript", "clock rot", "ascii pet", "adapter", "reset", "back" };
-const uint8_t SETTINGS_N = 12;
-extern bool adapterMode;   // defined near loop(); the "adapter" item toggles it
+// Radio + adapter controls moved to the Connection submenu (drawConn); the
+// "dj" item toggles djMode (DJ-booth scene rendered elsewhere in gr0m.cpp).
+const char* settingsItems[] = { "brightness", "sound", "led", "mic claps", "transcript", "clock rot", "ascii pet", "dj", "reset", "back" };
+const uint8_t SETTINGS_N = 10;
+extern bool adapterMode;   // defined near loop(); the Connection menu toggles it
+extern bool djMode;        // defined near adapterMode; the "dj" setting toggles it
+
+// Connection submenu — radio (WiFi/BT/Off) + Adapter, opened from the
+// CONNECTIONS info page (infoPage==4) via a BtnA long-press.
+bool    connOpen = false;
+uint8_t connSel  = 0;
+const char* connItems[] = { "WiFi", "BT", "Off", "Adapter", "Back" };
+const uint8_t CONN_N = 5;
+
+// Usage submenu — reporting span + period/level resets, opened from the
+// USAGE info page (INFO_PG_USAGE) via a BtnA long-press.
+bool    usageOpen = false;
+uint8_t usageSel  = 0;
+const char* usageItems[] = { "span", "reset count", "reset level", "Back" };
+const uint8_t USAGE_N = 4;
+// Local mirror of the daemon reporting window. Cycles day→week→month→all.
+static const char* const USAGE_SPANS[]  = { "1 day", "7 days", "30 days", "Full" };
+static const char* const USAGE_SPANVAL[] = { "day", "week", "month", "all" };
+static uint8_t usageSpanIdx = 0;
+// Tap-twice confirm for the two usage resets (mirrors applyReset's pattern).
+static uint32_t usageConfirmUntil = 0;
+static uint8_t  usageConfirmIdx   = 0xFF;
 
 bool    resetOpen = false;
 uint8_t resetSel  = 0;
@@ -173,40 +213,19 @@ static void applySetting(uint8_t idx) {
       applyBrightness();
       return;
     case 1: s.sound = !s.sound; break;
-    case 2:
-      // WiFi and BLE share one radio and are mutually exclusive. Enabling
-      // BT turns WiFi off; we reboot so the radio comes up cleanly in the
-      // chosen mode (BLE is only initialized at boot, in BT mode).
-      s.bt = !s.bt;
-      if (s.bt) s.wifi = false;
-      settingsSave();
-      Serial.printf("[settings] BT %s — rebooting\n", s.bt ? "ON (wifi off)" : "OFF");
-      delay(150);
-      ESP.restart();
+    case 2: s.led = !s.led; break;
+    case 3: s.mic = !s.mic; micSetEnabled(s.mic); break;
+    case 4: s.hud = !s.hud; break;   // transcript
+    case 5: s.clockRot = (s.clockRot + 1) % 3; break;
+    case 6: nextPet(); return;       // ascii pet
+    case 7:  // dj — toggle the DJ-booth scene (rendered in gr0m.cpp). In-memory;
+             // enabling clears adapter mode (the two scenes are exclusive).
+      djMode = !djMode;
+      if (djMode) adapterMode = false;
+      characterInvalidate();
       return;
-    case 3:
-      // Mutually exclusive with BT. Enabling WiFi turns BT off; reboot so
-      // the radio comes up in WiFi mode with no BLE init — WiFi + WireGuard
-      // then get the full radio.
-      s.wifi = !s.wifi;
-      if (s.wifi) s.bt = false;
-      settingsSave();
-      Serial.printf("[settings] WiFi %s — rebooting\n", s.wifi ? "ON (bt off)" : "OFF");
-      delay(150);
-      ESP.restart();
-      return;
-    case 4: s.led = !s.led; break;
-    case 5: s.mic = !s.mic; micSetEnabled(s.mic); break;
-    case 6: s.hud = !s.hud; break;
-    case 7: s.clockRot = (s.clockRot + 1) % 3; break;
-    case 8: nextPet(); return;
-    case 9:  // adapter (GPIO/logic-probe) mode — runtime; BtnB or reset exits
-      adapterMode = true;
-      if (!bleConnected()) bleAdvertisingStop();
-      settingsOpen = false;
-      return;
-    case 10: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 11: settingsOpen = false; characterInvalidate(); return;
+    case 8: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
+    case 9: settingsOpen = false; characterInvalidate(); return;
   }
   settingsSave();
 }
@@ -309,7 +328,8 @@ static void drawSettings() {
   spr.print("SETTINGS");
 
   Settings& s = settings();
-  bool vals[] = { s.sound, s.bt, s.wifi, s.led, s.mic, s.hud };
+  // On/off rows in the new layout: 1=sound 2=led 3=mic 4=transcript 7=dj.
+  // 5=clock rot (enum), 6=ascii pet (count); 0=brightness; 8/9 = reset/back.
   int rowsTop = my + HEADER_H + 2;
   for (int i = 0; i < SETTINGS_N; i++) {
     bool sel = (i == settingsSel);
@@ -324,18 +344,22 @@ static void drawSettings() {
     if (i == 0) {
       spr.setTextColor(p.body, PANEL);
       spr.printf("%u/4", brightLevel);
-    } else if (i >= 1 && i <= 6) {
-      spr.setTextColor(vals[i-1] ? GREEN : p.textDim, PANEL);
-      spr.print(vals[i-1] ? " on" : "off");
-    } else if (i == 7) {
+    } else if (i >= 1 && i <= 4) {
+      bool on = (i == 1) ? s.sound : (i == 2) ? s.led : (i == 3) ? s.mic : s.hud;
+      spr.setTextColor(on ? GREEN : p.textDim, PANEL);
+      spr.print(on ? " on" : "off");
+    } else if (i == 5) {
       static const char* const RN[] = { "auto", "port", "land" };
       spr.setTextColor(p.body, PANEL);
       spr.print(RN[s.clockRot]);
-    } else if (i == 8) {
+    } else if (i == 6) {
       uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
       uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
       spr.setTextColor(p.body, PANEL);
       spr.printf("%u/%u", pos, total);
+    } else if (i == 7) {
+      spr.setTextColor(djMode ? GREEN : p.textDim, PANEL);
+      spr.print(djMode ? " on" : "off");
     }
   }
 
@@ -385,6 +409,174 @@ static void drawReset() {
   spr.setTextColor(p.textDim, PANEL);
   spr.setCursor(mx + 6, fy + 4);
   spr.print("A Next   B Confirm");
+}
+
+// Connection submenu — radio (WiFi/BT/Off) + Adapter. Styled like
+// drawSettings (size-1 rows) so the labels and the on/off-ish state column
+// fit the 135-px width. Opened from the CONNECTIONS info page.
+static void drawConn() {
+  const Palette& p = characterPalette();
+  const int mw = W - 8, mx = 4;
+  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 18;
+  const int mh = HEADER_H + CONN_N * ROW_H + FOOTER_H;
+  const int my = (H - mh) / 2;
+
+  spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
+  spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
+
+  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
+  spr.setTextSize(1);
+  spr.setTextColor(p.bg, p.body);
+  spr.setCursor(mx + 6, my + 6);
+  spr.print("CONNECTION");
+
+  Settings& s = settings();
+  // Which radio mode is active now, so the row shows a live indicator.
+  bool wifiOn = s.wifi, btOn = s.bt, off = !s.wifi && !s.bt;
+  int rowsTop = my + HEADER_H + 3;
+  for (int i = 0; i < CONN_N; i++) {
+    bool sel = (i == connSel);
+    int ry = rowsTop + i * ROW_H;
+    if (sel) spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);
+    spr.setTextColor(sel ? p.text : p.textDim, PANEL);
+    spr.setCursor(mx + 8, ry + 4);
+    spr.print(connItems[i]);
+    // Active-radio dot on the matching row.
+    bool active = (i == 0 && wifiOn) || (i == 1 && btOn) || (i == 2 && off);
+    if (active) {
+      spr.setTextColor(GREEN, PANEL);
+      spr.setCursor(mx + mw - 16, ry + 4);
+      spr.print("o");
+    }
+  }
+
+  int fy = my + mh - FOOTER_H;
+  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
+  spr.setTextColor(p.textDim, PANEL);
+  spr.setCursor(mx + 6, fy + 4);
+  spr.print("A Next   B Select");
+}
+
+static void applyConn(uint8_t idx) {
+  Settings& s = settings();
+  switch (idx) {
+    case 0:  // WiFi — mutually exclusive with BT; reboot into WiFi mode.
+      s.wifi = true; s.bt = false;
+      settingsSave();
+      Serial.println("[conn] WiFi ON (bt off) — rebooting");
+      delay(150);
+      ESP.restart();
+      return;
+    case 1:  // BT — mutually exclusive with WiFi; reboot into BT mode.
+      s.bt = true; s.wifi = false;
+      settingsSave();
+      Serial.println("[conn] BT ON (wifi off) — rebooting");
+      delay(150);
+      ESP.restart();
+      return;
+    case 2:  // Off — both radios off; reboot so the radio comes up clean.
+      s.wifi = false; s.bt = false;
+      settingsSave();
+      Serial.println("[conn] radios OFF — rebooting");
+      delay(150);
+      ESP.restart();
+      return;
+    case 3:  // Adapter (GPIO/logic-probe) mode — runtime; BtnB or reset exits.
+      adapterMode = true;
+      if (!bleConnected()) bleAdvertisingStop();
+      connOpen = false;
+      characterInvalidate();
+      return;
+    case 4:  // Back
+      connOpen = false;
+      characterInvalidate();
+      return;
+  }
+}
+
+// Usage submenu — reporting span + period/level resets. Styled like
+// drawSettings. Opened from the USAGE info page.
+static void drawUsage() {
+  const Palette& p = characterPalette();
+  const int mw = W - 8, mx = 4;
+  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 20;
+  const int mh = HEADER_H + USAGE_N * ROW_H + FOOTER_H;
+  const int my = (H - mh) / 2;
+
+  spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
+  spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
+
+  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
+  spr.setTextSize(1);
+  spr.setTextColor(p.bg, p.body);
+  spr.setCursor(mx + 6, my + 6);
+  spr.print("USAGE");
+
+  int rowsTop = my + HEADER_H + 3;
+  for (int i = 0; i < USAGE_N; i++) {
+    bool sel = (i == usageSel);
+    int ry = rowsTop + i * ROW_H;
+    if (sel) spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);
+    bool armed = (i == usageConfirmIdx) &&
+                 (int32_t)(millis() - usageConfirmUntil) < 0;
+    spr.setTextColor(armed ? HOT : (sel ? p.text : p.textDim), PANEL);
+    spr.setCursor(mx + 8, ry + 5);
+    if (i == 0) {
+      // span row carries its current label inline.
+      spr.printf("span: %s", USAGE_SPANS[usageSpanIdx]);
+    } else if (armed) {
+      // reset level is the destructive one — make the confirm read "really?".
+      spr.print(i == 2 ? "really?!" : "really?");
+    } else {
+      spr.print(usageItems[i]);
+    }
+  }
+
+  int fy = my + mh - FOOTER_H;
+  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
+  spr.setTextColor(p.textDim, PANEL);
+  spr.setCursor(mx + 6, fy + 4);
+  spr.print("A Next   B Change");
+}
+
+static void applyUsage(uint8_t idx) {
+  uint32_t now = millis();
+  switch (idx) {
+    case 0:  // span — cycle day/week/month/all; emit to daemon, update label.
+      usageSpanIdx = (usageSpanIdx + 1) % 4;
+      {
+        char ex[28];
+        snprintf(ex, sizeof(ex), "\"value\":\"%s\"", USAGE_SPANVAL[usageSpanIdx]);
+        sendEvt("period", ex);
+      }
+      return;
+    case 1:    // reset count — tap-twice confirm.
+    case 2: {  // reset level — tap-twice confirm (destructive).
+      bool armed = (usageConfirmIdx == idx) && (int32_t)(now - usageConfirmUntil) < 0;
+      if (!armed) {
+        usageConfirmIdx = idx;
+        usageConfirmUntil = now + 3000;
+        beep(1400, 60);
+        return;
+      }
+      beep(800, 200);
+      usageConfirmIdx = 0xFF;
+      if (idx == 1) {
+        statsResetCounters();
+        sendEvt("token_reset", nullptr);
+      } else {
+        statsResetLevel();
+        characterInvalidate();
+        sendEvt("level_reset", nullptr);
+      }
+      return;
+    }
+    case 3:  // Back
+      usageOpen = false;
+      usageConfirmIdx = 0xFF;
+      characterInvalidate();
+      return;
+  }
 }
 
 void menuConfirm() {
@@ -851,6 +1043,50 @@ void drawInfo() {
       ln("  %s", gs == WG_UP ? "up" : gs == WG_FAILED ? "failed" : "connecting");
       if (gs == WG_UP) { spr.setTextColor(p.textDim, p.bg); ln("  %s", netWgTunnelIP()); }
     }
+
+    // Hint: BtnA long-press opens the Connection submenu (gated in loop()).
+    spr.setTextColor(p.textDim, p.bg);
+    spr.setCursor(4, H - 12); spr.print("hold A: edit");
+
+  } else if (infoPage == INFO_PG_USAGE) {
+    _infoHeader(p, y, "USAGE", infoPage);
+
+    // Period token figure (chest-LCD source) — hero number.
+    spr.setTextColor(p.text, p.bg);
+    spr.setTextSize(2);
+    spr.setCursor(4, y);
+    { char ub[12]; uint32_t uv = stats().tokens;
+      if (uv >= 1000000)   snprintf(ub, sizeof(ub), "%lu.%luM", uv / 1000000, (uv / 100000) % 10);
+      else if (uv >= 1000) snprintf(ub, sizeof(ub), "%luK", uv / 1000);
+      else                 snprintf(ub, sizeof(ub), "%lu", (unsigned long)uv);
+      spr.print(ub); }
+    spr.setTextSize(1);
+    spr.setTextColor(p.textDim, p.bg);
+    spr.setCursor(4, y + 18); spr.print("tokens");
+    y += 32;
+
+    // Approved / denied this period.
+    spr.setTextColor(0x07E0, p.bg); spr.setCursor(4, y);  spr.printf("OK %u", stats().okCount);
+    spr.setTextColor(HOT,    p.bg); spr.setCursor(68, y); spr.printf("NO %u", stats().noCount);
+    y += 14;
+
+    // Level (lifetime-derived monotonic score).
+    spr.setTextColor(p.text, p.bg); spr.setCursor(4, y);
+    spr.printf("LV %u", stats().level);
+    y += 14;
+
+    // Evolution stage + next milestone (e.g. "Stage 3/5 ->100M").
+    uint32_t nxt = evoNextMilestone();
+    char mb[8];
+    if (nxt == 0)              snprintf(mb, sizeof(mb), "max");
+    else if (nxt >= 1000000UL) snprintf(mb, sizeof(mb), "%luM", (unsigned long)(nxt / 1000000UL));
+    else                       snprintf(mb, sizeof(mb), "%luK", (unsigned long)(nxt / 1000UL));
+    spr.setTextColor(p.body, p.bg); spr.setCursor(4, y);
+    spr.printf("Stage %u/5 ->%s", evoStage(), mb);
+    y += 14;
+
+    spr.setTextColor(p.textDim, p.bg);
+    spr.setCursor(4, H - 12); spr.print("hold A: edit");
 
   } else {
     _infoHeader(p, y, "CREDITS", infoPage);
@@ -1527,6 +1763,9 @@ void setup() {
 // mode). Strips the desk-pet rendering + mic so the device is a focused
 // GPIO/logic probe; the command transports keep running.
 bool adapterMode = false;
+// DJ-booth scene flag — toggled by the "dj" Settings item (and elsewhere over
+// the transports/MCP). In-memory; the scene itself is rendered in gr0m.cpp.
+bool djMode = false;
 static void adapterTick(uint32_t now) {
   // On-device exit: BtnB (the top button) leaves adapter mode without a
   // reset, resuming BLE advertising. A reset also returns to pet mode.
@@ -1597,7 +1836,7 @@ void loop() {
       // Jump to the approval screen no matter what was open — drawApproval
       // only runs from drawHUD which only runs in DISP_NORMAL.
       displayMode = DISP_NORMAL;
-      menuOpen = settingsOpen = resetOpen = false;
+      menuOpen = settingsOpen = resetOpen = connOpen = usageOpen = false;
       applyDisplayMode();
       characterInvalidate();
       if (buddyMode) buddyInvalidate();
@@ -1669,6 +1908,17 @@ void loop() {
     beep(800, 60);
     if (resetOpen) { resetOpen = false; }
     else if (settingsOpen) { settingsOpen = false; characterInvalidate(); }
+    else if (connOpen)  { connOpen = false; characterInvalidate(); }
+    else if (usageOpen) { usageOpen = false; usageConfirmIdx = 0xFF; characterInvalidate(); }
+    // On the CONNECTIONS / USAGE info pages, long-press opens that page's
+    // edit submenu instead of the main menu (the page-advance B button
+    // otherwise leaves no free gesture to enter them).
+    else if (displayMode == DISP_INFO && infoPage == INFO_PG_CONNECTIONS) {
+      connOpen = true; connSel = 0;
+    }
+    else if (displayMode == DISP_INFO && infoPage == INFO_PG_USAGE) {
+      usageOpen = true; usageSel = 0; usageConfirmIdx = 0xFF;
+    }
     else {
       menuOpen = !menuOpen;
       menuSel = 0;
@@ -1687,6 +1937,13 @@ void loop() {
       } else if (settingsOpen) {
         beep(1800, 30);
         settingsSel = (settingsSel + 1) % SETTINGS_N;
+      } else if (connOpen) {
+        beep(1800, 30);
+        connSel = (connSel + 1) % CONN_N;
+      } else if (usageOpen) {
+        beep(1800, 30);
+        usageSel = (usageSel + 1) % USAGE_N;
+        usageConfirmIdx = 0xFF;   // scrolling away disarms a pending confirm
       } else if (menuOpen) {
         beep(1800, 30);
         menuSel = (menuSel + 1) % MENU_N;
@@ -1712,6 +1969,12 @@ void loop() {
     } else if (settingsOpen) {
       beep(2400, 30);
       applySetting(settingsSel);
+    } else if (connOpen) {
+      beep(2400, 30);
+      applyConn(connSel);
+    } else if (usageOpen) {
+      beep(2400, 30);
+      applyUsage(usageSel);
     } else if (menuOpen) {
       beep(2400, 30);
       menuConfirm();
@@ -1740,7 +2003,7 @@ void loop() {
   // Show the clock when nothing is happening — bridge heartbeat alone
   // doesn't count as activity (it's the only way to get the RTC synced).
   bool clocking = displayMode == DISP_NORMAL
-               && !menuOpen && !settingsOpen && !resetOpen && !inPrompt
+               && !menuOpen && !settingsOpen && !resetOpen && !connOpen && !usageOpen && !inPrompt
                && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
                && dataRtcValid() && _onUsb;
   if (clocking) clockUpdateOrient();
@@ -1824,6 +2087,8 @@ void loop() {
     else if (settings().hud) drawHUD();
     if (resetOpen) drawReset();
     else if (settingsOpen) drawSettings();
+    else if (connOpen) drawConn();
+    else if (usageOpen) drawUsage();
     else if (menuOpen) drawMenu();
     drawWifiIndicator();
     drawWifiPortalBanner();

@@ -1159,8 +1159,9 @@ static void drawHeartCloud(uint32_t t) {
 // to fit in the 20×11 inset.
 static void drawChestLCD(const char* text) {
   if (evoStage() < 4) return;            // Stage 4 (HUD): chest readout
-  int lx = HX - 11, ly = HY + 30;
-  int lw = 22, lh = 11;
+  // Wide enough for a 4-char K/M figure ("729K", "12M") without clipping.
+  int lx = HX - 15, ly = HY + 30;
+  int lw = 30, lh = 11;
   _t->fillRect(lx - 1, ly - 1, lw + 2, lh + 2, INK);
   _t->fillRect(lx, ly, lw, lh, 0x02E0);
   // 1px lit border
