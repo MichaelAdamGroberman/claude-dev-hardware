@@ -57,6 +57,31 @@ def _clearprompt_device() -> None:
         pass
 
 
+def _show_message(text: str) -> None:
+    """Best-effort: display a one-line message on the device screen WITHOUT an
+    approve/deny prompt. Used for tools the device's two buttons can't answer —
+    e.g. AskUserQuestion, whose 2-4 option choice happens in the terminal.
+    Mirrors gr0m_notify's wire format ({total,running,waiting,msg}). Swallows
+    all errors so the question still proceeds if the device is offline."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2)
+        s.connect(str(SOCK_PATH))
+        try:
+            cmd = {"total": 0, "running": 0, "waiting": 0, "msg": text[:60]}
+            s.sendall((json.dumps({"op": "send", "cmd": cmd}) + "\n").encode("utf-8"))
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(256)
+                if not chunk:
+                    break
+                buf += chunk
+        finally:
+            s.close()
+    except Exception:
+        pass
+
+
 def _allow_rules(cwd: str):
     """permissions.allow entries from user + project settings (best-effort)."""
     rules = []
@@ -108,6 +133,16 @@ def main() -> int:
 
     tool_name = payload.get("tool_name", "?")
     tool_input = payload.get("tool_input", {}) or {}
+
+    # AskUserQuestion is a 2-4 option question, not a binary approve/deny, so the
+    # device's A/B buttons can't answer it. Mirror the question text to the screen
+    # (display-only) and pass through, leaving the actual choice to Claude's
+    # terminal picker. Not gated by permission_mode — questions always prompt.
+    if tool_name == "AskUserQuestion":
+        qs = tool_input.get("questions") or []
+        if qs and isinstance(qs[0], dict):
+            _show_message(str(qs[0].get("question", "") or qs[0].get("header", "")))
+        return 0
 
     # Only wake the device when the user's approval is actually required. In
     # modes that auto-run the tool there is nothing to decide, so pass through
