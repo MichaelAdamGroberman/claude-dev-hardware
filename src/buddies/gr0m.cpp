@@ -27,11 +27,11 @@ static TFT_eSPI* _t = &spr;
 // ── Accelerometer-driven parallax ────────────────────────────────────
 // Each state function reads the IMU once and stashes the resulting
 // tilt offsets here. Drawing helpers add these offsets to specific
-// elements (visor "pupil", antenna sway, shadow position, smoke drift)
+// elements (visor "pupil", antenna sway, shadow position, particle drift)
 // to create a fake-3D / parallax-depth effect as the device is tilted.
 //   _tiltX:  -4..+4   negative = left tilt
 //   _tiltY:  -4..+4   negative = forward (away from user) tilt
-//   _gravX:  -2..+2   gravity component along screen x — drives smoke
+//   _gravX:  -2..+2   gravity component along screen x — drives particle drift
 static int8_t _tiltX = 0;
 static int8_t _tiltY = 0;
 static int8_t _gravX = 0;
@@ -71,7 +71,7 @@ static void readTilt() {
 }
 
 // Rigid-body face-plane offset. Every head-attached element (chassis,
-// visor, glasses, mouth, joint base) adds this so they rotate TOGETHER
+// visor, glasses, mouth) adds this so they rotate TOGETHER
 // as a single 3D plane. The chest stays anchored — head appears to
 // pivot on the neck.
 static int faceOffX() { return _tiltX; }       // ±8 px lateral shift
@@ -169,17 +169,14 @@ static inline int pkS(int len) {              // scale a length / radius
 //
 //   Default loadout (every state EXCEPT BUSY):
 //     • opaque black sunglasses overlaid across the visor
-//     • lit joint sticking out the mouth area with ember + rising smoke
 //
 //   BUSY state — gr0m gets serious:
 //     • sunglasses come OFF — the bare cyan/green visor is exposed
-//     • joint comes OUT of the mouth
-//     • both items shown tumbling discarded at the upper corners
-//       (sunglasses upper-left, joint upper-right with smoke trail)
+//     • the discarded sunglasses tumble at the upper-left corner
 //     • grimace mouth, antenna LED blinks
 //
-//   Mood particles (left side of canvas): red hearts rising → morph
-//   into green cannabis leaves at the half-life of their flight.
+//   Mood particles (left side of canvas): red hearts rising → fade
+//   into small neutral sparkles at the half-life of their flight.
 // ════════════════════════════════════════════════════════════════════
 
 // Palette (RGB565)
@@ -190,9 +187,6 @@ static const uint16_t INK        = 0x0000;  // sunglasses lens fill
 static const uint16_t STEEL      = 0x73AE;  // outlines + lens frame
 static const uint16_t SPECULAR      = 0xFFFF;
 static const uint16_t CRIMSON    = 0xF800;  // antenna LED, accents
-static const uint16_t EMBER_HOT  = 0xFD20;
-static const uint16_t EMBER_DIM  = 0xC000;
-static const uint16_t LEAF_GREEN = 0x0660;
 static const uint16_t HEART_RED  = 0xF810;
 static const uint16_t VISOR_IDLE = 0x05FF;  // cyan
 static const uint16_t VISOR_BUSY = 0x07E0;  // green (focused mode)
@@ -225,15 +219,21 @@ static void drawHeart(int x, int y, uint16_t c) {
   _t->fillTriangle(x - 3, y, x + 3, y, x, y + 4, c);
 }
 
-static void drawLeaf(int x, int y, uint16_t c) {
-  if (buddyScale() == 1) {               // tiny leaf for the mini character
-    _t->fillTriangle(x, y - 2, x - 1, y + 1, x + 1, y + 1, c);
-    _t->drawPixel(x, y + 2, c);
+// Small neutral sparkle/star — used as the fade-out terminus for the
+// mood-particle hearts. A 4-point twinkle, sized for home vs. mini.
+static void drawSparkle(int x, int y, uint16_t c) {
+  if (buddyScale() == 1) {               // tiny sparkle for the mini character
+    _t->drawPixel(x, y, c);
+    _t->drawPixel(x - 1, y, c);
+    _t->drawPixel(x + 1, y, c);
+    _t->drawPixel(x, y - 1, c);
+    _t->drawPixel(x, y + 1, c);
     return;
   }
-  _t->fillTriangle(x, y - 3, x - 2, y + 1, x + 2, y + 1, c);
-  _t->drawPixel(x, y + 2, c);
-  _t->drawPixel(x, y + 3, c);
+  _t->drawFastHLine(x - 2, y, 5, c);
+  _t->drawFastVLine(x, y - 2, 5, c);
+  _t->drawPixel(x - 1, y - 1, c);
+  _t->drawPixel(x + 1, y + 1, c);
 }
 
 // ── Robot body parts ────────────────────────────────────────────────
@@ -437,30 +437,6 @@ static void drawAntenna3D(uint16_t ledColor) {
     _t->drawPixel(p.x - 1, p.y - 1, SPECULAR);
   } else {
     _t->drawCircle(p.x, p.y, lr, CHASSIS_SH);
-  }
-}
-
-// 3D joint — pole sticking out the mouth area on the front face.
-// Only renders when the front face is visible (joint is "in front of" the head).
-static void drawJoint3D(uint32_t t, bool lit) {
-  if (evoStage() < 3) return;            // Stage 3 (Persona): the joint
-  if (!frontFaceVisible()) return;
-  // Object-space: emerges from front face (z = +22) near mouth (y = 14).
-  // Extends forward AND right, slight droop with gravity.
-  float dropY = (float)_gravX * 0.8f;
-  V3 base = { 8.0f,  14.0f + dropY * 0.3f, 22.0f };
-  V3 tip  = { 28.0f, 14.0f + dropY,        32.0f };
-  drawPole3D(base, tip, 0xF79E);
-  V2 baseP = rp(base);
-  V2 tipP  = rp(tip);
-  // Filter band near base — darker stub
-  _t->drawLine(baseP.x, baseP.y, baseP.x + (tipP.x - baseP.x) / 5,
-               baseP.y + (tipP.y - baseP.y) / 5, STEEL);
-  // Ember at tip
-  if (lit) {
-    uint16_t glow = ((t / 2) & 1) ? EMBER_HOT : EMBER_DIM;
-    _t->fillCircle(tipP.x, tipP.y, 2, glow);
-    _t->drawPixel(tipP.x + 1, tipP.y - 1, EMBER_HOT);
   }
 }
 
@@ -756,8 +732,8 @@ static void drawMouth(int mood, int yOff) {
       _t->drawCircle(mX, mY + 1, 5, CHASSIS_SH);
       break;
     case 5:  // tongue zigzag
-      _t->drawLine(mX - 6, mY, mX, mY + 3, EMBER_DIM);
-      _t->drawLine(mX, mY + 3, mX + 6, mY, EMBER_DIM);
+      _t->drawLine(mX - 6, mY, mX, mY + 3, 0xC000);
+      _t->drawLine(mX, mY + 3, mX + 6, mY, 0xC000);
       break;
     case 6:  // X
       _t->drawLine(mX - 5, mY - 2, mX + 5, mY + 3, CHASSIS_SH);
@@ -821,68 +797,7 @@ static void drawChest(uint16_t boltColor, int yOff) {
   drawBolt(HX, cY + 9, boltColor, glow);
 }
 
-// Joint emerging from the mouth (default state). The joint TIP angles
-// with gravity — tilt left and the lit end droops down-left, tilt right
-// and it droops down-right. The shaft is drawn as a thin diagonal line
-// instead of a horizontal rect, so the angle is visible.
-static void drawJointInMouth(uint32_t t, bool lit, int yOff) {
-  if (buddyScale() == 1) return;
-  int fx = faceOffX();
-  int fy = faceOffY();
-  int jY = HY + 14 + yOff + fy;
-  int jX0 = HX + 10 + fx;     // joint base attached to mouth corner
-  // Tip droops with gravity — _gravX maps -3..+3 to ±6 px of vertical drop
-  int dropY = _gravX * 2;
-  int jX1 = HX + 30 + fx;     // tip extends from base, also shifted by face
-  int tipY = jY + dropY;
-  // Shaft — three parallel diagonal lines for thickness (tapered look)
-  _t->drawLine(jX0,     jY - 1, jX1,     tipY - 1, 0xF79E);
-  _t->drawLine(jX0,     jY,     jX1,     tipY,     0xF79E);
-  _t->drawLine(jX0,     jY + 1, jX1,     tipY + 1, 0xF79E);
-  // Steel outline along the top edge
-  _t->drawLine(jX0,     jY - 1, jX1,     tipY - 1, STEEL);
-  // Filter band near the mouth (darker, 4 px wide)
-  _t->fillRect(jX0,     jY - 1, 4, 3, 0xA514);
-  if (lit) {
-    uint16_t glow = ((t / 2) & 1) ? EMBER_HOT : EMBER_DIM;
-    _t->fillCircle(jX1 + 2, tipY, 2, glow);
-    _t->drawPixel(jX1 + 4, tipY - 1, EMBER_HOT);
-  }
-}
-
-// Smoke rising from the joint tip. Smoke rises OPPOSITE to gravity,
-// so it drifts in the direction _away_ from the gravity vector.
-// Also follows the joint tip's drop angle so the smoke trail starts
-// at the actual ember position.
-static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
-  if (evoStage() < 3) return;            // Stage 3 (Persona): smoke
-  if (intensity <= 0) return;
-  int fx = faceOffX();
-  int fy = faceOffY();
-  int dropY = _gravX * 2;
-  int sX = HX + 32 + fx;
-  int sY = HY + 12 + yOff + fy + dropY;     // follow ember
-  // Smoke drift opposite gravity (negative for tilt-right, positive
-  // for tilt-left — so it appears to "rise straight up" in world frame
-  // even when the device is tilted)
-  int driftX = -_gravX * 2;
-  int n = (intensity == 1) ? 3 : (intensity == 2) ? 5 : 7;
-  for (int i = 0; i < n; i++) {
-    int phase = ((int)(t * 2) + i * 7) % 36;
-    int y = sY - 2 - phase;
-    if (y < 0) continue;
-    int curl = ((phase / 4) & 1) ? 1 : -1;
-    // Drift accumulates with height — higher particles drifted further
-    int x = sX + curl + (phase / 5) + (driftX * phase) / 12;
-    int r = (phase < 8) ? 2 : 1;
-    uint16_t color = (phase < 6) ? 0xF79E
-                   : (phase < 16) ? STEEL
-                                  : 0x39E7;
-    _t->fillCircle(pkX(x), pkY(y), r, color);
-  }
-}
-
-// ── BUSY-only: discarded items tumbling at the upper corners ───────
+// ── BUSY-only: discarded item tumbling at the upper-left corner ────
 
 // Glasses tumbling in upper-left, cycles through 4 orientation poses
 static void drawDiscardedGlasses(uint32_t t) {
@@ -930,61 +845,13 @@ static void drawDiscardedGlasses(uint32_t t) {
   _t->drawPixel(x - 14, y, blur);
 }
 
-// Joint tumbling in upper-right with trailing smoke
-static void drawDiscardedJoint(uint32_t t) {
-  static const int8_t BOB_X[4] = { 0, -2, -4, -2 };
-  static const int8_t BOB_Y[4] = { 0, -3, 0, 3 };
-  uint8_t pose = (t / 3) % 4;
-  int x = pkX(115 + BOB_X[pose]);
-  int y = pkY(16 + BOB_Y[pose]);
-  // Joint at 4 orientations
-  switch (pose) {
-    case 0:  // horizontal, ember-right
-      _t->fillRect(x - 6, y - 1, 12, 3, 0xF79E);
-      _t->drawRect(x - 6, y - 1, 12, 3, STEEL);
-      _t->fillCircle(x + 7, y, 2, EMBER_HOT);
-      break;
-    case 1:  // diagonal up-right
-      _t->drawLine(x - 5, y + 4, x + 5, y - 4, 0xF79E);
-      _t->drawLine(x - 5, y + 5, x + 5, y - 3, 0xF79E);
-      _t->drawLine(x - 5, y + 3, x + 5, y - 5, STEEL);
-      _t->fillCircle(x + 6, y - 5, 2, EMBER_HOT);
-      break;
-    case 2:  // vertical
-      _t->fillRect(x - 1, y - 6, 3, 12, 0xF79E);
-      _t->drawRect(x - 1, y - 6, 3, 12, STEEL);
-      _t->fillCircle(x, y - 7, 2, EMBER_HOT);
-      break;
-    case 3:  // diagonal down-right
-      _t->drawLine(x - 5, y - 4, x + 5, y + 4, 0xF79E);
-      _t->drawLine(x - 5, y - 3, x + 5, y + 5, 0xF79E);
-      _t->drawLine(x - 5, y - 5, x + 5, y + 3, STEEL);
-      _t->fillCircle(x + 6, y + 5, 2, EMBER_HOT);
-      break;
-  }
-  // Smoke trail from the discarded joint
-  for (int i = 0; i < 4; i++) {
-    int p = (t + i * 5) % 24;
-    int sy = y - 4 - p;
-    if (sy < 0) continue;
-    int sx = x + 2 + ((p / 3) & 1 ? 1 : -1);
-    uint16_t c = (p < 8) ? 0xF79E : (p < 16) ? STEEL : 0x39E7;
-    _t->fillCircle(sx, sy, p < 8 ? 2 : 1, c);
-  }
-  // Motion lines suggesting toss
-  uint16_t blur = 0x4208;
-  _t->drawPixel(x + 10, y, blur);
-  _t->drawPixel(x + 12, y - 1, blur);
-  _t->drawPixel(x + 14, y, blur);
-}
-
 // ── Mood particles ──────────────────────────────────────────────────
-// Hearts → leaves. Hearts rise on the left, morphing to green leaves
-// at the half-life of their flight.
+// Hearts rise on the left, fading into small neutral sparkles at the
+// half-life of their flight.
 static void drawMoodParticles(uint32_t t, int n, int speed) {
   if (evoStage() < 4) return;            // Stage 4 (HUD): mood particles
   const int LIFECYCLE = 28;
-  const int MORPH = LIFECYCLE / 2;
+  const int FADE = LIFECYCLE / 2;
   int baseX = -32;
   for (int i = 0; i < n; i++) {
     int phase = ((int)t * 2 / speed + i * 5) % LIFECYCLE;
@@ -992,13 +859,13 @@ static void drawMoodParticles(uint32_t t, int n, int speed) {
     if (y < 2 || y > HY + 40) continue;
     int x = HX + baseX + (n > 1 ? (i * 22) / (n - 1) : 0);
     x += ((phase / 2) & 1) ? 1 : -1;
-    // Drift with gravity — particles ride the same world-frame "up"
-    // axis as the smoke, so they all feel like a coherent atmosphere.
+    // Drift with gravity — particles ride a consistent world-frame "up"
+    // axis so they all feel like a coherent atmosphere.
     x += (-_gravX * phase) / 8;
-    if (phase < MORPH) {
+    if (phase < FADE) {
       drawHeart(pkX(x), pkY(y), HEART_RED);
     } else {
-      drawLeaf(pkX(x), pkY(y), LEAF_GREEN);
+      drawSparkle(pkX(x), pkY(y), SPECULAR);
     }
   }
 }
@@ -1196,7 +1063,7 @@ static void drawConfetti(uint32_t t) {
   bool peek = (buddyScale() == 1);
   int n = peek ? 7 : 14;
   int maxY = peek ? 64 : 132;
-  static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, EMBER_HOT };
+  static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, 0xFD20 };
   for (int i = 0; i < n; i++) {
     int phase = ((int)t * 2 + i * 11) % 40;
     int x = (i * 11 + (int)t * 3) % 135;
@@ -1983,9 +1850,7 @@ static void doIdle(uint32_t t) {
   drawVisor3D(VISOR_IDLE);
   if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(((t / 25) % 5 == 0) ? 2 : 0);
-  drawJoint3D(t, true);
   drawAntenna3D(0);
-  drawSmokeFromMouth(t, 2, 0);
   if (evoStage() >= 5) drawHumanDisguise(t);  // Stage 5 (Ascended): final form
   drawMoodParticles(t, 2, 3);
 }
@@ -2028,9 +1893,7 @@ static void doAttention(uint32_t t) {
   drawVisor3D(VISOR_ALERT);
   if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(4);                     // O shout
-  drawJoint3D(t, true);
   drawAntenna3D(pulse ? VISOR_ALERT : 0);
-  drawSmokeFromMouth(t, 1, 0);
   // Stage 5 (Ascended): final form. Wear the coat/fedora/glasses but keep
   // the alarm "!" as the attention tell so we don't stack two bubbles — the
   // disguise's own "HELLO HUMAN" bubble would fight the alert here.
@@ -2058,9 +1921,7 @@ static void doCelebrate(uint32_t t) {
   drawVisor3D(RAINBOW[(t + 3) % 6]);
   drawSunglasses3D();
   drawMouth3D(2);                     // smile
-  drawJoint3D(t, true);
   drawAntenna3D(RAINBOW[t % 6]);
-  drawSmokeFromMouth(t, 2, _yProjOff);
   if (evoStage() >= 5) {              // Stage 5 (Ascended): party costume
     drawPartyHat();                   // pointy hat with stripes + pom
     drawConfetti(t);                  // confetti rain across the screen
@@ -2081,7 +1942,6 @@ static void doDizzy(uint32_t t) {
   drawVisor3D(v);
   if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(6);                     // X
-  drawJoint3D(t, false);              // extinguished
   drawAntenna3D((t & 3) == 0 ? CRIMSON : 0);
   if (evoStage() >= 5) drawHumanDisguise(t);  // Stage 5 (Ascended): final form
   drawMoodParticles(t, 3, 2);
@@ -2099,9 +1959,7 @@ static void doHeart(uint32_t t) {
   drawVisor3D(VISOR_LOVE);
   if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(((t / 8) & 1) ? 2 : 7);
-  drawJoint3D(t, true);
   drawAntenna3D(((t / 3) & 1) ? HEART_RED : 0);
-  drawSmokeFromMouth(t, 2, 0);
   if (evoStage() >= 5) {            // Stage 5 (Ascended): final form + heart cloud
     drawHeartCloud(t);
     drawHumanDisguise(t);

@@ -86,7 +86,7 @@ Stage 0.
 | **0 Spark** | 0 | head cube + visor eyes, flat-shaded | a lone chip-head, just booted |
 | **1 Frame** | 1,000,000 | + neck cube + chest cube + mouth | torso assembles, gains a mouth |
 | **2 Powered** | 5,000,000 | + chest bolt + antenna LED | recognizably gr0m, powered on |
-| **3 Persona** | 25,000,000 | + sunglasses + joint + smoke | the signature attitude |
+| **3 Persona** | 25,000,000 | + sunglasses | the signature attitude |
 | **4 HUD** | 100,000,000 | + mood particles + chest-LCD readout + dynamic per-face lighting/specular | polished, "alive, counting" |
 | **5 Ascended** | 250,000,000 | + state costumes (nightcap, headphones/laptop, party hat, confetti, heart cloud, speech bubble) | the full current design |
 
@@ -110,8 +110,6 @@ static void drawNeck3D()  { if (evoStage() < 1) return; /* ... */ }
 static void drawBolt3D(...){ if (evoStage() < 2) return; /* ... */ }
 static void drawAntenna3D(...){ if (evoStage() < 2) return; /* ... */ }
 static void drawSunglasses3D(){ if (evoStage() < 3) return; /* ... */ }
-static void drawJoint3D(...)  { if (evoStage() < 3) return; /* ... existing frontFaceVisible check ... */ }
-static void drawSmokeFromMouth(...){ if (evoStage() < 3) return; /* ... existing scale guard ... */ }
 static void drawMoodParticles(...) { if (evoStage() < 4) return; /* ... existing scale guard ... */ }
 static void drawChestLCD(...) { if (evoStage() < 4) return; /* ... */ }
 ```

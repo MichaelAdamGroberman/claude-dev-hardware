@@ -488,7 +488,7 @@ footer a:hover{text-decoration:underline}
               <div class="act-row">
                 <span class="act-t">10:24:09</span>
                 <span class="act-k" style="color:var(--ink2);background:rgba(58,52,46,.08)">msg</span>
-                <span class="act-tx">"can you make gr0m's mouth blow real smoke?"</span>
+                <span class="act-tx">"can you make gr0m wave hello?"</span>
               </div>
             </div>
           </div>
@@ -632,7 +632,7 @@ footer a:hover{text-decoration:underline}
 <section aria-labelledby="s3-title">
   <p class="section-label">③ gr0m — Enriched</p>
   <h2 class="section-title" id="s3-title">9 Character States</h2>
-  <p class="section-sub">Adds: jointed hands, pixel laptop for busy state, headphones, chest LCD with live stats, speech bubbles, party hat, sleep cap, and a tiny desk — without losing the 3D head, visor parallax, joint + smoke, lightning bolt, and heart→leaf particles.</p>
+  <p class="section-sub">Adds: articulated hands, pixel laptop for busy state, headphones, chest LCD with live stats, speech bubbles, party hat, sleep cap, and a tiny desk — without losing the 3D head, visor parallax, sunglasses, lightning bolt, and heart→sparkle particles.</p>
   <div class="gr0m-grid" id="gr0m-grid" aria-label="gr0m character states"></div>
 </section>
 
@@ -715,11 +715,9 @@ function pathEl(d, attrs) {
 const C = {
   chassis:'#c5c7c6', chassisHi:'#efefef', chassisSh:'#7a7c7b',
   chassisDk:'#4a4d4c', steel:'#2c2e30', ink:'#0a0b0c', rivet:'#1a1c1e',
-  spec:'#ffffff', crimson:'#ff2a1a', emberHot:'#ffb02e', leaf:'#2b8f1f',
+  spec:'#ffffff', crimson:'#ff2a1a',
   heart:'#ff2d92', visorIdle:'#00bdff', visorBusy:'#29d65b',
   visorAlert:'#ff2a1a', visorLove:'#ff2d92', visorOff:'#283038',
-  joint:'#f4ddb5', jointBand:'#a8895f',
-  smoke1:'#dadddf', smoke2:'#8b8f93', smoke3:'#4a4e54',
 };
 const VISOR = {
   sleep:C.visorOff, idle:C.visorIdle, busy:C.visorBusy,
@@ -832,37 +830,15 @@ function buildAntenna(color, sway) {
   return g;
 }
 
-function buildJoint(drop) {
-  drop = drop || 0;
-  return gEl(
-    pxEl(75,68+drop,20,3,C.joint),
-    pxEl(75,68+drop,20,1,'#fff4d6',{opacity:'0.5'}),
-    pxEl(75,70+drop,20,1,C.jointBand,{opacity:'0.4'}),
-    pxEl(75,68+drop,4,3,C.jointBand),
-    ciEl(97,69+drop,2,C.emberHot),
-    pxEl(98,67+drop,1,1,'#ffd06a')
-  );
-}
-
-function buildSmoke() {
-  const g = svgEl('g',{});
-  const fromX=95, fromY=68;
-  for (let i=0;i<6;i++) {
-    const yOff=-6-i*5, xOff=Math.sin(i*1.3)*4, r=2+i*0.6;
-    const col=i<2?C.smoke1:i<4?C.smoke2:C.smoke3;
-    g.appendChild(ciEl(fromX+xOff,fromY+yOff,r,col,{opacity:String(1-i/6*0.5)}));
-  }
-  return g;
-}
-
 function buildParticles(count) {
   const baseX=24; const g=svgEl('g',{});
   for (let i=0;i<count;i++) {
-    const y=80-i*9, morph=i>=Math.floor(count/2), x=baseX+((i&1)?2:-2);
-    if (morph) {
+    const y=80-i*9, fade=i>=Math.floor(count/2), x=baseX+((i&1)?2:-2);
+    if (fade) {
+      // Hearts fade into small neutral sparkles at the half-life of their rise.
       g.appendChild(gEl(
-        polyEl('polygon','0,-3 -2,1 2,1',{fill:C.leaf,transform:`translate(${x} ${y})`}),
-        pxEl(x,y+2,1,2,C.leaf)
+        pxEl(x-2,y,5,1,C.spec),
+        pxEl(x,y-2,1,5,C.spec)
       ));
     } else {
       const sub=svgEl('g',{}); sub.setAttribute('transform',`translate(${x} ${y})`);
@@ -998,7 +974,7 @@ function makeGr0m(opts) {
   const o = Object.assign({
     mood:'idle', vb:'0 0 135 160', w:135, h:160,
     pupil:0, sway:0, ledOn:false,
-    sg:true, sj:true, ss:true,
+    sg:true,
     hands:null, laptop:false, headphones:false,
     partyHat:false, nightcap:false, zzz:false,
     confetti:false, hearts:false, bubble:null,
@@ -1021,7 +997,6 @@ function makeGr0m(opts) {
   if (o.confetti) svg.appendChild(buildConfetti());
   if (o.shadow) svg.appendChild(buildShadow());
   if (o.bubble) svg.appendChild(buildSpeechBubble(o.bubble.text, o.bubble.color, o.bubble.x, o.bubble.y));
-  if (o.sj && o.ss && !o.nightcap) svg.appendChild(buildSmoke());
   svg.appendChild(buildChest(vc, o.lcdText));
   svg.appendChild(buildNeck());
   if (o.hands) svg.appendChild(buildHands(o.hands));
@@ -1030,7 +1005,6 @@ function makeGr0m(opts) {
   svg.appendChild(buildVisor(vc, o.pupil));
   if (o.sg) svg.appendChild(buildSunglasses());
   svg.appendChild(buildMouth(m));
-  if (o.sj && !o.nightcap) svg.appendChild(buildJoint(o.mood==='sleep'?2:0));
   svg.appendChild(buildAntenna(ledColor, o.sway));
   if (o.headphones) svg.appendChild(buildHeadphones());
   if (o.partyHat) svg.appendChild(buildPartyHat());
@@ -1408,7 +1382,7 @@ screensData.forEach(s => {
 
 // ── Inject gr0m states ────────────────────────────────────────
 const gr0mData = [
-  {label:'01 · IDLE', sub:'Sunglasses on, joint lit, hearts→leaves. Cyan visor with pupil parallax.',
+  {label:'01 · IDLE', sub:'Sunglasses on, hearts→sparkles. Cyan visor with pupil parallax.',
    bg:'linear-gradient(180deg,#1a1f2c 0%,#0a0e16 100%)',
    opts:{mood:'idle',particles:3,pupil:-2}},
   {label:'02 · BUSY · NEW', sub:'Headphones on, pixel laptop in his hands with code on screen. Green visor.',
@@ -1432,7 +1406,7 @@ const gr0mData = [
   {label:'08 · AT HIS DESK · NEW', sub:'Pixel desk with coffee mug + steam. Pairs with landscape clock screen.',
    bg:'linear-gradient(180deg,#1c1812 0%,#0a0806 100%)',
    opts:{mood:'idle',desk:true,particles:2}},
-  {label:'09 · DIZZY', sub:'X mouth, antenna crimson, joint out. Triggers on shake.',
+  {label:'09 · DIZZY', sub:'X mouth, antenna crimson, shades off. Triggers on shake.',
    bg:'linear-gradient(180deg,#1a1810 0%,#0a0904 100%)',
    opts:{mood:'dizzy',sg:false,ledOn:true,particles:2}},
 ];
