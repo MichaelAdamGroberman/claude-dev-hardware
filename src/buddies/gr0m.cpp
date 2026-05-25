@@ -214,12 +214,23 @@ static const uint16_t HAT_BAND   = 0x18E3;  // fedora hatband (near-black)
 // ── Particle primitives ─────────────────────────────────────────────
 
 static void drawHeart(int x, int y, uint16_t c) {
+  if (buddyScale() == 1) {               // tiny heart for the mini character
+    _t->fillCircle(x - 1, y - 1, 1, c);
+    _t->fillCircle(x + 1, y - 1, 1, c);
+    _t->fillTriangle(x - 2, y, x + 2, y, x, y + 2, c);
+    return;
+  }
   _t->fillCircle(x - 2, y - 1, 2, c);
   _t->fillCircle(x + 2, y - 1, 2, c);
   _t->fillTriangle(x - 3, y, x + 3, y, x, y + 4, c);
 }
 
 static void drawLeaf(int x, int y, uint16_t c) {
+  if (buddyScale() == 1) {               // tiny leaf for the mini character
+    _t->fillTriangle(x, y - 2, x - 1, y + 1, x + 1, y + 1, c);
+    _t->drawPixel(x, y + 2, c);
+    return;
+  }
   _t->fillTriangle(x, y - 3, x - 2, y + 1, x + 2, y + 1, c);
   _t->drawPixel(x, y + 2, c);
   _t->drawPixel(x, y + 3, c);
@@ -1200,23 +1211,30 @@ static void drawHeartCloud(uint32_t t) {
 // to fit in the 20×11 inset.
 static void drawChestLCD(const char* text) {
   if (evoStage() < 4) return;            // Stage 4 (HUD): chest readout
+  if (!frontFaceVisible()) return;       // hide as the chest turns away (like the bolt)
   bool peek = (buddyScale() == 1);
-  // pk-mapped + scaled onto the shrunk chest. In peek the box becomes a
-  // small lit panel with NO text: a 4-char token figure is illegible at
-  // mini size and a native-width box dwarfs the body, so we show only the
-  // green HUD screen to match the Stage-4 silhouette.
-  int lx = pkX(HX - 15), ly = pkY(HY + 30);
-  int lw = pkS(30), lh = pkS(11);
-  _t->fillRect(lx - 1, ly - 1, lw + 2, lh + 2, INK);
-  _t->fillRect(lx, ly, lw, lh, 0x02E0);
-  // 1px lit border
-  _t->drawRect(lx, ly, lw, lh, 0x0660);
-  if (peek) return;                      // screen only — text won't fit the mini
+  // Project onto the chest's front plane (z = +12, same plane as drawBolt3D)
+  // so the readout ROTATES and scales WITH the body instead of floating as a
+  // flat 2D overlay. projectV() handles the peek shrink — no pk* mapping.
+  V2 tl = rp({ -15, 31, 12 });
+  V2 tr = rp({  15, 31, 12 });
+  V2 br = rp({  15, 41, 12 });
+  V2 bl = rp({ -15, 41, 12 });
+  // Lit green screen (two triangles) + frame outline.
+  _t->fillTriangle(tl.x, tl.y, tr.x, tr.y, br.x, br.y, 0x02E0);
+  _t->fillTriangle(tl.x, tl.y, br.x, br.y, bl.x, bl.y, 0x02E0);
+  _t->drawLine(tl.x, tl.y, tr.x, tr.y, 0x0660);
+  _t->drawLine(tr.x, tr.y, br.x, br.y, 0x0660);
+  _t->drawLine(br.x, br.y, bl.x, bl.y, 0x0660);
+  _t->drawLine(bl.x, bl.y, tl.x, tl.y, 0x0660);
+  if (peek) return;                      // screen only — token text won't fit the mini
+  // Token text centered on the projected screen, upright (like the DJ BPM tag).
+  int textLen = 0; while (text[textLen]) textLen++;
+  int cx = (tl.x + tr.x + bl.x + br.x) / 4;
+  int cy = (tl.y + tr.y + bl.y + br.y) / 4;
   _t->setTextSize(1);
   _t->setTextColor(0x5FE0, 0x02E0);
-  int textLen = 0; while (text[textLen]) textLen++;
-  int textW = textLen * 6;
-  _t->setCursor(lx + (lw - textW) / 2, ly + 2);
+  _t->setCursor(cx - textLen * 3, cy - 3);
   _t->print(text);
 }
 
@@ -1277,12 +1295,12 @@ static void drawTrenchcoat() {
   // Upturned collar — two short panels standing up either side of the neck,
   // the classic "hiding my face" trench-coat collar. Rises above the chest
   // top toward the head.
-  V2 cL0 = onChest(-12, 26);
-  V2 cL1 = onChest(-3, 18);
-  V2 cL2 = onChest(-8, 26);
-  V2 cR0 = onChest( 12, 26);
-  V2 cR1 = onChest( 3, 18);
-  V2 cR2 = onChest( 8, 26);
+  V2 cL0 = onChest(-17, 27);
+  V2 cL1 = onChest(-2, 7);     // huge collar peak rising up around the face
+  V2 cL2 = onChest(-11, 27);
+  V2 cR0 = onChest( 17, 27);
+  V2 cR1 = onChest( 2, 7);
+  V2 cR2 = onChest( 11, 27);
   _t->fillTriangle(cL0.x, cL0.y, cL1.x, cL1.y, cL2.x, cL2.y, COAT_HI);
   _t->fillTriangle(cR0.x, cR0.y, cR1.x, cR1.y, cR2.x, cR2.y, COAT_HI);
   _t->drawLine(cL0.x, cL0.y, cL1.x, cL1.y, COAT_SH);
@@ -1299,28 +1317,28 @@ static void drawFedora() {
   // Brim — a flat-ish ellipse straddling the top of the head (head top
   // y≈-20). Built from two triangles across the front plane so it skews
   // with rotation. Drawn first so the crown overlaps it.
-  V2 bL = onFace(-26, -18);
-  V2 bR = onFace( 26, -18);
-  V2 bF = onFace(  0, -14);    // front lip dips toward the viewer
-  V2 bB = onFace(  0, -22);    // back edge
+  V2 bL = onFace(-32, -11);
+  V2 bR = onFace( 32, -11);
+  V2 bF = onFace(  0,  -6);    // front lip dips low toward the viewer
+  V2 bB = onFace(  0, -16);    // back edge
   _t->fillTriangle(bL.x, bL.y, bR.x, bR.y, bF.x, bF.y, HAT_BROWN);
   _t->fillTriangle(bL.x, bL.y, bR.x, bR.y, bB.x, bB.y, HAT_BROWN);
   _t->drawLine(bL.x, bL.y, bF.x, bF.y, HAT_SH);
   _t->drawLine(bR.x, bR.y, bF.x, bF.y, HAT_SH);
-  // Crown — trapezoid sitting on the brim, with a pinched dent on top.
-  V2 kBL = onFace(-15, -19);
-  V2 kBR = onFace( 15, -19);
-  V2 kTL = onFace(-11, -31);
-  V2 kTR = onFace( 11, -31);
+  // Tall crown — trapezoid sitting on the brim, jammed down low, pinched on top.
+  V2 kBL = onFace(-19, -12);
+  V2 kBR = onFace( 19, -12);
+  V2 kTL = onFace(-14, -36);
+  V2 kTR = onFace( 14, -36);
   _t->fillTriangle(kBL.x, kBL.y, kBR.x, kBR.y, kTR.x, kTR.y, HAT_BROWN);
   _t->fillTriangle(kBL.x, kBL.y, kTR.x, kTR.y, kTL.x, kTL.y, HAT_BROWN);
   // Pinch dent — a darker crease down the crown center.
-  V2 dT = onFace(0, -31);
-  V2 dB = onFace(0, -23);
+  V2 dT = onFace(0, -36);
+  V2 dB = onFace(0, -14);
   _t->drawLine(dT.x, dT.y, dB.x, dB.y, HAT_SH);
   // Hatband — dark stripe around the base of the crown.
-  V2 hbL = onFace(-15, -20);
-  V2 hbR = onFace( 15, -20);
+  V2 hbL = onFace(-19, -13);
+  V2 hbR = onFace( 19, -13);
   _t->drawLine(hbL.x, hbL.y, hbR.x, hbR.y, HAT_BAND);
   _t->drawLine(hbL.x, hbL.y + 1, hbR.x, hbR.y + 1, HAT_BAND);
   // Crown top highlight.
@@ -1386,13 +1404,32 @@ static void drawHumanTell(uint32_t t) {
   _t->drawLine(sR.x, sR.y, cR.x, cR.y, CHASSIS_SH);
 }
 
+// Comically oversized fake mustache — the disguise's loudest "tell": a fat
+// black Groucho bush across the lower face, just under the glasses, with
+// upturned curled tips and a tiny chassis notch under the nose.
+static void drawFakeMustache() {
+  if (!frontFaceVisible()) return;
+  V2 tl = onFace(-15, 6),  tr = onFace(15, 6);
+  V2 bl = onFace(-12, 12), br = onFace(12, 12);
+  _t->fillTriangle(tl.x, tl.y, tr.x, tr.y, br.x, br.y, INK);
+  _t->fillTriangle(tl.x, tl.y, br.x, br.y, bl.x, bl.y, INK);
+  // Upturned curled tips beyond the main bush.
+  V2 lt = onFace(-20, 3), rt = onFace(20, 3);
+  _t->fillTriangle(tl.x, tl.y, lt.x, lt.y, bl.x, bl.y, INK);
+  _t->fillTriangle(tr.x, tr.y, rt.x, rt.y, br.x, br.y, INK);
+  // Tiny notch of chassis under the nose so the two halves read.
+  V2 nb = onFace(0, 6), nd = onFace(0, 9);
+  _t->drawLine(nb.x, nb.y, nd.x, nd.y, CHASSIS);
+}
+
 // One-call composite for the Stage-5 disguise everyday look. Order matters:
 // coat first (body layer), then the head gear over the chassis, then the
-// tell on top of everything.
+// mustache + tell on top of everything.
 static void drawHumanDisguise(uint32_t t) {
   drawTrenchcoat();
   drawFedora();
   drawHumanGlasses();
+  drawFakeMustache();
   drawHumanTell(t);
 }
 
