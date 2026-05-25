@@ -82,6 +82,19 @@ static void _applyJson(const char* line, TamaState* out) {
   if (deserializeJson(doc, line)) return;
   if (xferCommand(doc)) { _lastLiveMs = millis(); return; }
 
+  // Explicit prompt clear — the daemon sends {"cmd":"clearprompt"} on timeout
+  // or cancel. ONLY this (or a replacing prompt frame, below) may clear the
+  // pending prompt; routine token/session/idle frames must not, or the prompt
+  // disappears mid-decision and the button press is lost.
+  {
+    const char* _cmd = doc["cmd"];
+    if (_cmd && strcmp(_cmd, "clearprompt") == 0) {
+      out->promptId[0] = 0; out->promptTool[0] = 0; out->promptHint[0] = 0; out->promptSrc[0] = 0;
+      _lastLiveMs = millis();
+      return;
+    }
+  }
+
   // Turn event — the desktop fires this whenever Claude completes a
   // turn, with the full SDK content array. We extract just the text
   // blocks into a truncated preview for the banner display.
@@ -166,9 +179,11 @@ static void _applyJson(const char* line, TamaState* out) {
     strncpy(out->promptTool, pt  ? pt  : "", sizeof(out->promptTool)-1); out->promptTool[sizeof(out->promptTool)-1]=0;
     strncpy(out->promptHint, ph  ? ph  : "", sizeof(out->promptHint)-1); out->promptHint[sizeof(out->promptHint)-1]=0;
     strncpy(out->promptSrc,  ps  ? ps  : "", sizeof(out->promptSrc)-1);  out->promptSrc[sizeof(out->promptSrc)-1]=0;
-  } else {
-    out->promptId[0] = 0; out->promptTool[0] = 0; out->promptHint[0] = 0; out->promptSrc[0] = 0;
   }
+  // promptId is STICKY: a non-prompt frame (token/session/idle heartbeat) does
+  // NOT clear it — only an explicit {"cmd":"clearprompt"} (handled above) or a
+  // replacing prompt frame does. This stops the prompt from vanishing
+  // mid-decision when routine telemetry arrives between prompt and button.
   out->lastUpdated = millis();
   _lastLiveMs = millis();
 }

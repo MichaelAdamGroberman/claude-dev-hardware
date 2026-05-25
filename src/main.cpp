@@ -2048,7 +2048,7 @@ void loop() {
     bool flourish   = idle && (now % DJ_PERIOD_MS) < DJ_WINDOW_MS;
     djActive = stage5 && (celebrate || flourish);
   }
-  if (djActive) { djTick(now); delay(16); return; }
+  if (djActive && !inPrompt) { djTick(now); delay(16); return; }   // a pending approval always wins the screen
 
   // A+B held together for 3s toggles the human-costume easter egg. Checked
   // every frame BEFORE the early-return below, so the same gesture also exits.
@@ -2067,7 +2067,7 @@ void loop() {
       abHeldSince = 0;
     }
   }
-  if (humanCostumeActive) { humanCostumeTick(now); delay(16); return; }
+  if (humanCostumeActive && !inPrompt) { humanCostumeTick(now); delay(16); return; }   // approval wins over the easter egg too
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;
