@@ -1,0 +1,1469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>gr0m · Developer Hardware Buddy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A redesigned M5StickC Plus desk pet for Claude Desktop — bigger screens, enriched gr0m character, live Hardware Buddy window.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=DM+Mono:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── reset & tokens ─────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#efe9dd;--ink:#1a1612;--ink2:#3a342e;--ink-dim:#6b6358;--ink-faint:#a39b8e;
+  --paper:#fbf6ef;--paper2:#f5ebe0;--paper3:#efe2d3;
+  --coral:#d97757;--coral-dim:#e7a48a;--coral-soft:#f5d9c8;
+  --success:#2e9e5b;--danger:#c83a3a;--info:#3f6ea8;
+  --cl:rgba(20,16,12,0.08);--cl2:rgba(20,16,12,0.05);
+}
+
+html,body{background:var(--bg);color:var(--ink);
+  font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* ── global layout ──────────────────────────────────────────── */
+.wrap{max-width:1400px;margin:0 auto;padding:0 24px}
+
+.site-header{text-align:center;padding:56px 24px 40px}
+.site-header h1{font-family:"Silkscreen",monospace;font-size:clamp(26px,5vw,50px);
+  font-weight:700;color:var(--ink);letter-spacing:-1px;line-height:1.1}
+.site-header h1 .accent{color:var(--coral)}
+.site-header .sub{font-family:"DM Mono",monospace;font-size:clamp(12px,2vw,14px);
+  color:var(--ink-dim);margin:12px auto 0;max-width:560px;line-height:1.6}
+.badge-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:20px}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:999px;
+  background:var(--paper2);color:var(--ink-dim);font-size:11px;font-weight:500;
+  border:1px solid rgba(20,16,12,.10)}
+.badge.live{background:#eaf7ee;color:var(--success)}
+.badge.alert{background:#fff0ee;color:var(--coral)}
+
+section{padding:0 24px 80px;max-width:1400px;margin:0 auto}
+.section-label{font-family:"Silkscreen",monospace;font-size:11px;font-weight:700;
+  letter-spacing:2px;text-transform:uppercase;color:var(--coral);margin-bottom:8px}
+.section-title{font-size:clamp(20px,3vw,28px);font-weight:700;color:var(--ink);
+  letter-spacing:-0.4px;margin-bottom:6px}
+.section-sub{font-size:14px;color:var(--ink-dim);max-width:700px;line-height:1.6;margin-bottom:32px}
+
+/* ── card system ────────────────────────────────────────────── */
+.card{background:var(--paper);border-radius:12px;border:1px solid var(--cl);
+  box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 1px 3px rgba(20,16,12,.04);overflow:hidden}
+.ch{display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px 10px;border-bottom:1px solid var(--cl2)}
+.ch-t{font-size:11px;font-weight:600;color:var(--ink-dim);letter-spacing:1.5px;text-transform:uppercase}
+.ch-h{font-size:11px;color:var(--ink-faint)}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;
+  background:var(--paper2);color:var(--ink-dim);font-size:11px;font-weight:500;
+  line-height:1;white-space:nowrap}
+.pdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* ── Section 1: Buddy Window ────────────────────────────────── */
+.window-stage{background:linear-gradient(180deg,#d4c4ad 0%,#b8a48a 60%,#8a7559 100%);
+  border-radius:16px;padding:24px;overflow:auto}
+
+.bw{background:var(--paper);border-radius:14px;overflow:hidden;min-width:900px;
+  box-shadow:0 30px 60px -20px rgba(20,16,12,.25),0 0 0 1px rgba(20,16,12,.06);
+  display:flex;flex-direction:column;font-size:13px;color:var(--ink)}
+
+.titlebar{height:38px;background:linear-gradient(180deg,#f5ebe0 0%,#ebe1d4 100%);
+  border-bottom:1px solid var(--cl);display:flex;align-items:center;padding:0 14px;
+  gap:8px;position:relative;flex-shrink:0}
+.tls{display:flex;gap:6px}
+.tl{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.1)}
+.tl-r{background:#ff5f57}.tl-y{background:#febc2e}.tl-g{background:#28c840}
+.tb-title{position:absolute;left:0;right:0;text-align:center;font-size:13px;font-weight:600;
+  color:var(--ink2);pointer-events:none}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.tb-right button{background:transparent;border:none;font-size:16px;color:var(--ink-dim);cursor:pointer;padding:2px 4px}
+
+.bw-body{display:grid;grid-template-columns:268px 1fr 268px;gap:12px;padding:12px;background:var(--paper)}
+
+/* columns */
+.col{display:flex;flex-direction:column;gap:12px}
+
+/* mirror card */
+.mirror-card{display:flex;flex-direction:column;align-items:center;padding:14px 10px 10px}
+.mirror-top{display:flex;justify-content:space-between;width:100%;margin-bottom:10px}
+.mirror-id{width:100%;margin-top:12px}
+.mirror-name{display:flex;justify-content:space-between;align-items:baseline}
+.mirror-name strong{font-size:14px;font-weight:700}
+.mirror-name code{font-family:"DM Mono",monospace;font-size:10px;color:var(--ink-faint)}
+.mirror-pills{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+
+/* stats strip */
+.stats-strip{padding:12px 14px 4px;display:flex;justify-content:space-between;align-items:baseline}
+.ss-lbl{font-size:11px;font-weight:600;color:var(--ink-dim);letter-spacing:1.5px;text-transform:uppercase}
+.ss-h{font-size:11px;color:var(--ink-faint)}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:4px 14px 10px}
+.st .st-l{font-size:10px;color:var(--ink-faint);letter-spacing:1px;text-transform:uppercase;font-weight:600}
+.st .st-v{font-size:19px;font-weight:700;line-height:1;letter-spacing:-0.5px;margin-top:2px}
+.st .st-s{font-size:10px;color:var(--ink-dim);margin-left:2px}
+
+/* sparkline */
+.spark-wrap{padding:0 8px 8px}
+
+/* approval mirror */
+.appr-inner{background:linear-gradient(180deg,#fff7ec 0%,#ffe6cc 100%);border-radius:10px;
+  border:1px solid var(--coral-dim);padding:14px 14px;margin:12px 14px 14px;position:relative;overflow:hidden}
+.appr-stripe{position:absolute;top:0;left:0;bottom:0;width:4px;background:var(--coral)}
+.appr-hdr{display:flex;justify-content:space-between;align-items:center}
+.appr-alert{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--coral);text-transform:uppercase}
+.appr-time{font-family:"DM Mono",monospace;font-size:11px;color:var(--ink-dim)}
+.appr-tool{display:flex;align-items:baseline;gap:8px;margin-top:5px}
+.appr-tool strong{font-size:19px;font-weight:700}
+.appr-cmd{font-family:"DM Mono",monospace;font-size:11px;color:var(--ink2);
+  padding:2px 5px;background:rgba(255,255,255,.5);border-radius:4px}
+.appr-btns{display:flex;gap:7px;margin-top:9px}
+.appr-btns button{flex:1;padding:7px 8px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;border:none}
+.btn-allow{background:var(--success);color:#fff;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.btn-deny{background:#fff;color:var(--danger);border:1px solid var(--danger) !important}
+.appr-hint{font-size:10px;color:var(--ink-dim);margin-top:6px}
+
+/* activity */
+.act-card{flex:1;display:flex;flex-direction:column;min-height:200px}
+.act-scroll{overflow-y:auto;flex:1}
+.act-row{display:flex;gap:7px;padding:5px 13px;border-top:1px solid var(--cl2);align-items:baseline}
+.act-row:first-child{border-top:none}
+.act-t{font-family:"DM Mono",monospace;font-size:10px;color:var(--ink-faint);width:50px;flex-shrink:0}
+.act-k{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  padding:2px 4px;border-radius:3px;width:40px;text-align:center;flex-shrink:0}
+.act-tx{font-size:11px;color:var(--ink);line-height:1.4}
+
+/* pet meters */
+.pet-m{padding:10px 14px 12px}
+.pet-sg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:9px}
+.pet-mr{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+.pet-ml{font-size:10px;font-weight:600;color:var(--ink-faint);letter-spacing:1px;
+  text-transform:uppercase;width:44px;flex-shrink:0}
+.pet-mt{display:flex;gap:3px;flex:1}
+.pet-seg{flex:1;height:7px;border-radius:2px}
+.pet-mv{font-family:"DM Mono",monospace;font-size:10px;color:var(--ink-dim);width:24px;text-align:right;flex-shrink:0}
+.div{height:1px;background:var(--cl2);margin:8px 0}
+
+/* active character */
+.char-prev{display:flex;align-items:center;gap:9px;padding:12px 13px}
+.char-thumb{width:56px;height:48px;background:#11161e;border-radius:8px;overflow:hidden;
+  flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.char-info strong{font-size:13px;font-weight:700}
+.char-info p{font-size:10px;color:var(--ink-dim);margin-top:2px}
+.char-btns{display:flex;gap:5px;padding:0 13px 11px}
+.btn-g{flex:1;padding:5px 7px;border-radius:6px;background:#fff;border:1px solid var(--cl);
+  color:var(--ink2);font-size:11px;cursor:pointer}
+.btn-p{flex:1;padding:5px 7px;border-radius:6px;background:var(--coral);border:none;
+  color:#fff;font-size:11px;font-weight:600;cursor:pointer}
+
+/* char library */
+.char-lib{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:10px 13px 7px}
+.sp-tile{display:flex;flex-direction:column;gap:3px}
+.sp-thumb{height:50px;border-radius:7px;display:flex;align-items:center;justify-content:center;
+  font-family:"Silkscreen",monospace;font-size:14px;line-height:1;border:1px solid var(--cl);overflow:hidden}
+.sp-thumb.active{border:2px solid var(--coral);box-shadow:0 0 0 3px var(--coral-soft)}
+.sp-name{font-size:10px;font-weight:500;color:var(--ink2);padding-left:2px}
+.sp-name.active{font-weight:700;color:var(--ink)}
+.char-drop{margin:5px 13px 11px;padding:12px 8px;border-radius:10px;
+  border:2px dashed var(--coral-dim);background:linear-gradient(180deg,#fff7ec 0%,#ffe6cc 100%);
+  text-align:center;color:var(--ink-dim);cursor:pointer}
+.char-drop-plus{font-size:16px;margin-bottom:3px}
+.char-drop-t{font-size:11px;font-weight:600;color:var(--ink2)}
+.char-drop-s{font-size:10px;margin-top:2px}
+
+/* tools */
+.tools-l{padding:5px 13px 11px}
+.tool-btn{display:flex;align-items:center;gap:7px;width:100%;padding:5px 3px;
+  background:transparent;border:none;color:var(--ink);font-size:11px;text-align:left;
+  cursor:pointer;border-radius:6px}
+.tool-btn:hover{background:var(--paper2)}
+.tool-btn.danger{color:var(--danger)}
+.ti{width:15px;flex-shrink:0;color:var(--ink-dim)}
+.tarr{margin-left:auto;color:var(--ink-faint);font-size:10px}
+
+/* ── Section 2: M5 screens ──────────────────────────────────── */
+.screens-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:24px}
+.scr-ab{display:flex;flex-direction:column;align-items:center;gap:9px}
+.scr-ab-lbl{font-family:"Silkscreen",monospace;font-size:10px;color:var(--ink-dim);
+  text-transform:uppercase;letter-spacing:1.5px;text-align:center}
+
+.dev-stage{border-radius:12px;padding:18px 14px;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 50% 30%,#3a2820 0%,#2b1d14 70%,#0a0604 100%)}
+.dev-stage.alert-bg{background:radial-gradient(circle at 50% 30%,#3a2020 0%,#3a1818 70%,#0a0404 100%)}
+.dev-stage.blue-bg{background:radial-gradient(circle at 50% 30%,#1a2240 0%,#0e1a30 70%,#02040a 100%)}
+
+/* ── Section 3: gr0m grid ───────────────────────────────────── */
+.gr0m-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
+.gr0m-ab{border-radius:12px;overflow:hidden;position:relative;aspect-ratio:3/4;
+  display:flex;align-items:center;justify-content:center}
+.gr0m-ab svg{display:block}
+.gr0m-cap{position:absolute;bottom:0;left:0;right:0;padding:32px 12px 12px;
+  background:linear-gradient(to top,rgba(0,0,0,.72) 0%,transparent 100%)}
+.gr0m-cl{font-family:"Silkscreen",monospace;font-size:10px;font-weight:700;letter-spacing:2px;
+  color:var(--coral);text-transform:uppercase;line-height:1}
+.gr0m-cs{font-size:11px;color:#bdb2a4;margin-top:5px;line-height:1.4}
+
+/* ── photos row ─────────────────────────────────────────────── */
+.photos-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px}
+.photo-card{border-radius:12px;overflow:hidden;background:#111}
+.photo-card img{width:100%;height:220px;object-fit:cover;display:block}
+.photo-card figcaption{padding:10px 14px;font-size:11px;color:#a39b8e;background:#1a1612}
+
+/* ── footer ─────────────────────────────────────────────────── */
+footer{text-align:center;padding:36px 24px 56px;font-size:11px;
+  color:var(--ink-faint);font-family:"DM Mono",monospace}
+footer a{color:var(--coral);text-decoration:none}
+footer a:hover{text-decoration:underline}
+
+/* ── responsive ─────────────────────────────────────────────── */
+@media(max-width:960px){
+  .bw-body{grid-template-columns:1fr;overflow-x:auto}
+  .bw{min-width:700px}
+}
+@media(max-width:600px){
+  .screens-grid{grid-template-columns:repeat(2,1fr);gap:16px}
+  .gr0m-grid{grid-template-columns:repeat(2,1fr)}
+  .photos-row{grid-template-columns:1fr}
+}
+@media(max-width:360px){
+  .screens-grid{grid-template-columns:1fr 1fr}
+  .site-header{padding:32px 16px 24px}
+}
+:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+
+/* M5 screen internals — pixel font, no smoothing */
+.scr{font-family:"Silkscreen",monospace;background:#000;color:#fff;
+  width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;line-height:1;font-size:12px}
+.scr *{line-height:1 !important;box-sizing:border-box}
+.scr-hdr{display:flex;align-items:center;justify-content:space-between;
+  padding:5px 5px 4px;border-bottom:1px solid #1a1c1e;flex-shrink:0}
+.scr-name{font-size:11px;font-weight:700}
+.scr-st{display:flex;gap:4px;align-items:center;font-size:9px}
+.scr-dot{border-radius:50%;display:inline-block;flex-shrink:0}
+.scr-buddy{flex-shrink:0;overflow:hidden}
+.scr-body{flex:1;min-height:0;overflow:hidden;padding:5px 6px 0}
+.scr-lbl{font-size:9px;color:#7a8492;text-transform:uppercase;letter-spacing:.5px}
+.scr-big{font-size:24px;font-weight:700}
+.scr-big-k{font-size:15px;color:#7a8492}
+.bat-shell{position:relative;border:1px solid #7a8492;border-radius:1px;display:inline-block}
+.bat-fill{position:absolute;left:1px;top:1px}
+.bat-tip{display:inline-block;background:#7a8492;border-radius:1px}
+.scr-alarm{background:#ff2a1a;color:#000;padding:4px 5px;display:flex;
+  justify-content:space-between;align-items:center;font-weight:700;flex-shrink:0}
+.scr-tool-b{padding:7px 6px 5px;flex-shrink:0}
+.scr-tool-l{font-size:9px;color:#ff8c1a;letter-spacing:1px;font-weight:700}
+.scr-tool-n{font-size:34px;font-weight:700}
+.scr-cmd-a{padding:5px 6px;flex:1;min-height:0;overflow:hidden}
+.scr-cmd-l{font-size:9px;color:#7a8492;letter-spacing:1px;font-weight:700}
+.scr-cmd-t{font-family:"DM Mono",monospace;font-size:11px;color:#fff;margin-top:4px;word-break:break-all}
+.scr-act-row{display:flex;flex-shrink:0}
+.scr-allow{flex:1;background:#0a3a18;color:#5cff7a;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding:7px 0;border-right:1px solid #000}
+.scr-deny{flex:1;background:#3a0a08;color:#ff6e5b;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding:7px 0}
+.scr-ai{font-size:16px;font-weight:700}
+.scr-al{font-size:9px;letter-spacing:1px;font-weight:700;margin-top:2px}
+.scr-menu-hdr{background:#181a22;padding:5px 7px;border-bottom:1px solid #2a2f3a;
+  display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.scr-mi{padding:4px 8px;display:flex;align-items:center;justify-content:space-between;font-size:12px}
+.scr-mi.act{background:#ff8c1a;color:#000;font-weight:700}
+.scr-pk-hdr{background:#1a3a6b;color:#fff;padding:5px 7px;text-align:center;
+  font-size:11px;font-weight:700;letter-spacing:2px;flex-shrink:0}
+.scr-pk-body{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding:8px 5px}
+.scr-pk-box{margin-top:8px;padding:7px;background:#0a0c0e;border:2px solid #00bdff;
+  border-radius:4px;box-shadow:0 0 12px rgba(0,189,255,.4);font-size:22px;font-weight:700;letter-spacing:2px}
+.scr-pet-hdr{padding:3px 5px;display:flex;align-items:center;gap:5px;
+  border-bottom:1px solid #1a1c1e;flex-shrink:0}
+.scr-pet-body{flex:1;min-height:0;overflow:hidden;padding:4px 6px 0}
+.lv-chip{display:inline-block;background:#ff8c1a;color:#000;padding:2px 6px;
+  border-radius:3px;font-weight:700;margin-bottom:3px}
+.mini-dots{display:inline-flex;gap:2px;vertical-align:middle}
+.mini-dot{border-radius:50%}
+.mini-bars{display:inline-flex;gap:2px;vertical-align:middle}
+.mini-bar{border-radius:1px}
+.s2x2{display:grid;grid-template-columns:1fr 1fr;column-gap:6px;row-gap:2px}
+.s2x2-l{font-size:8px;color:#7a8492;letter-spacing:.4px}
+.s2x2-v{font-size:12px;font-weight:700}
+.scr-bt-body{flex:1;min-height:0;overflow:hidden;padding:7px 6px 5px}
+.scr-sess{display:flex;gap:3px;padding:3px 3px 0;border-top:1px solid #1a1c1e;flex-shrink:0}
+.scr-sc{flex:1;background:#0e1014;padding:2px 3px;border-radius:2px}
+.scr-sc .sl{font-size:7px;color:#7a8492}
+.scr-sc .sv{font-size:12px;font-weight:700}
+.scr-tr{flex:1;min-height:0;overflow:hidden;padding:4px 5px 0}
+.scr-tr .tl{font-size:11px;color:#fff}
+.scr-tr .td{font-size:11px;color:#7a8492;margin-top:2px}
+.scr-info-pk{flex-shrink:0;overflow:hidden}
+.scr-info-b{padding:4px 7px;display:flex;justify-content:space-between;align-items:center;
+  background:#0a0c0e;border-top:1px solid #1a1c1e;border-bottom:1px solid #1a1c1e;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ─────────────────────────────────────────────────── -->
+<header class="site-header" role="banner">
+  <h1><span class="accent">gr0m</span> · Developer Hardware Buddy</h1>
+  <p class="sub">A redesigned M5StickC Plus desk pet for Claude Desktop — bigger screens, enriched character, live approval mirror.</p>
+  <div class="badge-row">
+    <span class="badge live">● Live device pairing</span>
+    <span class="badge">M5StickC Plus</span>
+    <span class="badge">ESP32 / PlatformIO</span>
+    <span class="badge alert">claude-dev-hardware</span>
+    <span class="badge">Silkscreen font</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 1: Hardware Buddy Window
+════════════════════════════════════════════════════════════ -->
+<section aria-labelledby="s1-title">
+  <p class="section-label">① Hardware Buddy Window</p>
+  <h2 class="section-title" id="s1-title">Claude Desktop Window — Redesigned</h2>
+  <p class="section-sub">Reframes the current pairing window as a real maker dashboard: live device mirror, in-window approval, activity stream, pet stats, character library, device tools.</p>
+
+  <div class="window-stage" role="region" aria-label="Hardware Buddy desktop window mockup">
+    <div class="bw">
+
+      <!-- title bar -->
+      <div class="titlebar">
+        <div class="tls" aria-hidden="true">
+          <div class="tl tl-r"></div>
+          <div class="tl tl-y"></div>
+          <div class="tl tl-g"></div>
+        </div>
+        <div class="tb-title">Hardware Buddy &amp; Maker Devices</div>
+        <div class="tb-right">
+          <span class="pill" aria-hidden="true">⌘ dev mode</span>
+          <button aria-label="Settings">⚙</button>
+        </div>
+      </div>
+
+      <!-- 3-col body -->
+      <div class="bw-body">
+
+        <!-- LEFT -->
+        <div class="col">
+          <div class="card mirror-card">
+            <div class="mirror-top">
+              <span class="pill" style="background:#eaf7ee;color:var(--success)">
+                <span class="pdot" style="background:var(--success)"></span>LIVE
+              </span>
+              <span class="pill"><span style="font-family:'DM Mono',monospace">2.3s</span> ago</span>
+            </div>
+            <!-- M5 mirror — Approval screen at 1.0× -->
+            <div id="mirror-m5" style="transform:scale(0.97);transform-origin:top center"></div>
+            <div class="mirror-id">
+              <div class="mirror-name">
+                <strong>gr0m</strong>
+                <code>Claude-A1B2</code>
+              </div>
+              <div class="mirror-pills">
+                <span class="pill" style="background:#eaf7ee;color:var(--success)">
+                  <span class="pdot" style="background:var(--success)"></span>Encrypted
+                </span>
+                <span class="pill">87% 🔋</span>
+                <span class="pill">4h 12m</span>
+                <span class="pill">−58 dB</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><span class="ch-t">Pet · Level 5</span><span class="ch-h">+24% this week</span></div>
+            <div class="pet-m">
+              <div class="pet-sg">
+                <div class="st"><div class="st-l">Approved</div><div class="st-v" style="color:var(--success)">42</div></div>
+                <div class="st"><div class="st-l">Denied</div><div class="st-v" style="color:var(--danger)">3</div></div>
+                <div class="st"><div class="st-l">Napped</div><div class="st-v" style="color:var(--info)">2h<span class="st-s">14m</span></div></div>
+              </div>
+              <div class="div"></div>
+              <div class="pet-mr">
+                <span class="pet-ml">Fed</span>
+                <div class="pet-mt">
+                  <div class="pet-seg" style="background:var(--coral)"></div><div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div><div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div><div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div><div class="pet-seg" style="background:var(--paper2)"></div>
+                  <div class="pet-seg" style="background:var(--paper2)"></div><div class="pet-seg" style="background:var(--paper2)"></div>
+                </div>
+                <span class="pet-mv">7/10</span>
+              </div>
+              <div class="pet-mr">
+                <span class="pet-ml">Energy</span>
+                <div class="pet-mt">
+                  <div class="pet-seg" style="background:var(--success)"></div><div class="pet-seg" style="background:var(--success)"></div>
+                  <div class="pet-seg" style="background:var(--success)"></div><div class="pet-seg" style="background:var(--success)"></div>
+                  <div class="pet-seg" style="background:var(--paper2)"></div>
+                </div>
+                <span class="pet-mv">4/5</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENTER -->
+        <div class="col">
+          <div class="card">
+            <div class="stats-strip">
+              <span class="ss-lbl">Today</span>
+              <span class="ss-h">since 12:00 AM PT</span>
+            </div>
+            <div class="stats-grid">
+              <div class="st"><div class="st-l">Tokens</div><div class="st-v">184K<span class="st-s">out</span></div></div>
+              <div class="st"><div class="st-l">Running</div><div class="st-v" style="color:var(--success)">3</div></div>
+              <div class="st"><div class="st-l">Waiting</div><div class="st-v" style="color:var(--coral)">1</div></div>
+              <div class="st"><div class="st-l">Sessions</div><div class="st-v">14</div></div>
+            </div>
+            <div class="spark-wrap">
+              <svg width="100%" height="36" viewBox="0 0 500 36" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#d97757" stop-opacity=".18"/>
+                    <stop offset="100%" stop-color="#d97757" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <polygon points="0,36 0,34 24,32 48,30 72,28 96,25 120,26 144,22 168,19 192,20 216,15 240,18 264,11 288,13 312,8 336,10 360,6 384,4 408,3 432,2 456,1 480,0 500,0 500,36" fill="url(#sg)"/>
+                <polyline points="0,34 24,32 48,30 72,28 96,25 120,26 144,22 168,19 192,20 216,15 240,18 264,11 288,13 312,8 336,10 360,6 384,4 408,3 432,2 456,1 480,0 500,0" fill="none" stroke="#d97757" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              </svg>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><span class="ch-t">Permission Prompt · Live</span><span class="ch-h">approve here or on the stick</span></div>
+            <div class="appr-inner">
+              <div class="appr-stripe" aria-hidden="true"></div>
+              <div class="appr-hdr">
+                <span class="appr-alert">● Awaiting approval</span>
+                <span class="appr-time">3s ago</span>
+              </div>
+              <div class="appr-tool">
+                <strong>Bash</strong>
+                <span class="appr-cmd">rm -rf /tmp/foo</span>
+              </div>
+              <div class="appr-btns">
+                <button class="btn-allow" aria-label="Allow this tool call">✓ Allow once</button>
+                <button class="btn-deny" aria-label="Deny this tool call">✗ Deny</button>
+              </div>
+              <p class="appr-hint">Also: press A on the stick to allow, B to deny</p>
+            </div>
+          </div>
+
+          <div class="card act-card">
+            <div class="ch"><span class="ch-t">Activity</span><span class="ch-h">newest first · auto-syncs with stick</span></div>
+            <div class="act-scroll" role="log" aria-label="Activity log">
+              <div class="act-row">
+                <span class="act-t">10:42:18</span>
+                <span class="act-k" style="color:var(--info);background:rgba(63,110,168,.10)">tool</span>
+                <span class="act-tx">Bash · git push origin main</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:41:42</span>
+                <span class="act-k" style="color:var(--info);background:rgba(63,110,168,.10)">tool</span>
+                <span class="act-tx">Bash · yarn test</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:40:55</span>
+                <span class="act-k" style="color:var(--ink-dim);background:rgba(107,99,88,.10)">read</span>
+                <span class="act-tx">Reading src/main.cpp (lines 1024–1200)</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:39:31</span>
+                <span class="act-k" style="color:var(--success);background:rgba(46,158,91,.10)">edit</span>
+                <span class="act-tx">Edited src/buddies/gr0m.cpp</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:37:02</span>
+                <span class="act-k" style="color:var(--info);background:rgba(63,110,168,.10)">tool</span>
+                <span class="act-tx">Bash · ls -la characters/</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:35:48</span>
+                <span class="act-k" style="color:var(--success);background:rgba(46,158,91,.10)">ok</span>
+                <span class="act-tx">Allowed: Bash · pio run -t upload</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:32:11</span>
+                <span class="act-k" style="color:var(--ink);background:rgba(26,22,18,.06)">msg</span>
+                <span class="act-tx">Done. Next, let's wire the chest LCD.</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:24:09</span>
+                <span class="act-k" style="color:var(--ink2);background:rgba(58,52,46,.08)">msg</span>
+                <span class="act-tx">"can you make gr0m's mouth blow real smoke?"</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT -->
+        <div class="col">
+          <div class="card">
+            <div class="ch"><span class="ch-t">Active Character</span></div>
+            <div class="char-prev">
+              <div class="char-thumb" aria-hidden="true">
+                <!-- gr0m SVG miniature -->
+                <svg viewBox="22 22 90 60" width="56" height="48" style="display:block;image-rendering:pixelated" shape-rendering="crispEdges" aria-hidden="true">
+                  <rect x="42" y="38" width="50" height="36" fill="#4a4d4c" rx="4"/>
+                  <rect x="40" y="32" width="54" height="46" fill="#c5c7c6" rx="6"/>
+                  <rect x="44" y="34" width="46" height="2" fill="#efefef"/>
+                  <rect x="46" y="46" width="42" height="12" fill="#0a0b0c"/>
+                  <rect x="47" y="47" width="40" height="10" fill="#00bdff"/>
+                  <rect x="65" y="49" width="3" height="6" fill="#fff"/>
+                  <rect x="59" y="66" width="16" height="1" fill="#7a7c7b"/>
+                  <rect x="59" y="68" width="16" height="1" fill="#7a7c7b"/>
+                  <line x1="67" y1="32" x2="67" y2="22" stroke="#7a7c7b" stroke-width="1.5"/>
+                  <circle cx="67" cy="22" r="3" fill="none" stroke="#7a7c7b" stroke-width="1"/>
+                  <polygon points="64,77 70,77 73,85 61,85" fill="#7a7c7b"/>
+                  <rect x="45" y="85" width="44" height="22" fill="#c5c7c6" rx="3"/>
+                  <polygon points="69,89 65,89 64,96 67,96 65,103 71,94 68,94 70,89" fill="#00bdff"/>
+                </svg>
+              </div>
+              <div class="char-info">
+                <strong>gr0m</strong>
+                <p>ASCII · 3D head · accel parallax</p>
+              </div>
+              <span class="pill" style="background:#eaf7ee;color:var(--success)">
+                <span class="pdot" style="background:var(--success)"></span>Active
+              </span>
+            </div>
+            <div class="char-btns">
+              <button class="btn-g" aria-label="Previous character">← prev</button>
+              <button class="btn-g" aria-label="Next character">next →</button>
+              <button class="btn-p" aria-label="Switch character">Switch…</button>
+            </div>
+          </div>
+
+          <div class="card" style="flex:1">
+            <div class="ch"><span class="ch-t">Character Library</span><span class="ch-h">18 installed</span></div>
+            <div class="char-lib" aria-label="Installed character packs">
+              <div class="sp-tile">
+                <div class="sp-thumb active" style="background:#11161e" aria-label="gr0m — active">
+                  <svg viewBox="20 24 95 64" width="60" height="44" style="display:block;image-rendering:pixelated" shape-rendering="crispEdges" aria-hidden="true">
+                    <rect x="42" y="38" width="50" height="36" fill="#4a4d4c" rx="4"/>
+                    <rect x="40" y="32" width="54" height="46" fill="#c5c7c6" rx="6"/>
+                    <rect x="44" y="34" width="46" height="2" fill="#efefef"/>
+                    <rect x="46" y="46" width="42" height="12" fill="#0a0b0c"/>
+                    <rect x="47" y="47" width="40" height="10" fill="#00bdff"/>
+                    <rect x="65" y="49" width="3" height="6" fill="#fff"/>
+                    <rect x="59" y="66" width="16" height="1" fill="#7a7c7b"/>
+                    <rect x="59" y="68" width="16" height="1" fill="#7a7c7b"/>
+                    <line x1="67" y1="32" x2="67" y2="22" stroke="#7a7c7b" stroke-width="1.5"/>
+                    <circle cx="67" cy="22" r="3" fill="#00bdff"/>
+                    <polygon points="64,77 70,77 73,85 61,85" fill="#7a7c7b"/>
+                    <rect x="45" y="85" width="44" height="22" fill="#c5c7c6" rx="3"/>
+                    <polygon points="69,89 65,89 64,96 67,96 65,103 71,94 68,94 70,89" fill="#00bdff"/>
+                  </svg>
+                </div>
+                <span class="sp-name active">gr0m</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#0c1108" aria-label="bufo character">
+                  <img src="docs/characters/bufo/idle_0.gif" alt="bufo" width="44" height="36" style="image-rendering:pixelated;object-fit:contain">
+                </div>
+                <span class="sp-name">bufo</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#1a140a;color:#ffd60a" aria-label="duck character">&lt;o)</div>
+                <span class="sp-name">duck</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#1a0e0a;color:#e8b074" aria-label="cat character">(=^^)</div>
+                <span class="sp-name">cat</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#0e1018;color:#cbd5e8" aria-label="ghost character">~o~</div>
+                <span class="sp-name">ghost</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#0a140e;color:#5dc26b" aria-label="cactus character">#|#</div>
+                <span class="sp-name">cactus</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#180a0a;color:#c83a3a" aria-label="dragon character">&gt;:D</div>
+                <span class="sp-name">dragon</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#180a14;color:#e84a8c" aria-label="octopus character">~()~</div>
+                <span class="sp-name">octopus</span>
+              </div>
+              <div class="sp-tile">
+                <div class="sp-thumb" style="background:#11161e;color:#a3b3d6" aria-label="robot character">[oo]</div>
+                <span class="sp-name">robot</span>
+              </div>
+            </div>
+            <div class="char-drop" role="button" tabindex="0" aria-label="Drop a character folder to install">
+              <div class="char-drop-plus">＋</div>
+              <div class="char-drop-t">Drop a character folder</div>
+              <div class="char-drop-s">GIFs + manifest.json · ≤ 1.8 MB</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><span class="ch-t">Device Tools</span></div>
+            <div class="tools-l">
+              <button class="tool-btn"><span class="ti" aria-hidden="true">⌨</span><span>Rename device</span><span class="tarr" aria-hidden="true">→</span></button>
+              <button class="tool-btn"><span class="ti" aria-hidden="true">👤</span><span>Set owner name</span><span class="tarr" aria-hidden="true">→</span></button>
+              <button class="tool-btn"><span class="ti" aria-hidden="true">⎚</span><span>Capture screen</span><span class="tarr" aria-hidden="true">→</span></button>
+              <button class="tool-btn"><span class="ti" aria-hidden="true">↻</span><span>Reboot</span><span class="tarr" aria-hidden="true">→</span></button>
+              <div class="div"></div>
+              <button class="tool-btn danger"><span class="ti" aria-hidden="true">⊗</span><span>Forget · unpair</span><span class="tarr" aria-hidden="true">→</span></button>
+              <button class="tool-btn danger"><span class="ti" aria-hidden="true">⚠</span><span>Factory reset</span><span class="tarr" aria-hidden="true">→</span></button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /bw-body -->
+    </div><!-- /bw -->
+  </div><!-- /window-stage -->
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 2: M5 Screens (built as static SVG inline)
+════════════════════════════════════════════════════════════ -->
+<section aria-labelledby="s2-title">
+  <p class="section-label">② M5StickC Screens — Redesigned</p>
+  <h2 class="section-title" id="s2-title">8 Redesigned Screens</h2>
+  <p class="section-sub">Bigger fonts (size-2 floor, hero numbers at size-3), tighter info hierarchy, scannable at arm's length. Same 135×240 device — better real estate.</p>
+  <div class="screens-grid" id="screens-grid" role="list" aria-label="M5StickC screen designs"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 3: gr0m enrichments (built as static SVG inline)
+════════════════════════════════════════════════════════════ -->
+<section aria-labelledby="s3-title">
+  <p class="section-label">③ gr0m — Enriched</p>
+  <h2 class="section-title" id="s3-title">9 Character States</h2>
+  <p class="section-sub">Adds: jointed hands, pixel laptop for busy state, headphones, chest LCD with live stats, speech bubbles, party hat, sleep cap, and a tiny desk — without losing the 3D head, visor parallax, joint + smoke, lightning bolt, and heart→leaf particles.</p>
+  <div class="gr0m-grid" id="gr0m-grid" aria-label="gr0m character states"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 4: Real device photos
+════════════════════════════════════════════════════════════ -->
+<section aria-labelledby="s4-title">
+  <p class="section-label">The Hardware</p>
+  <h2 class="section-title" id="s4-title">Real Device</h2>
+  <p class="section-sub">M5StickC Plus — red enclosure, 1.14" LCD, ESP32-PICO-V3-02, accelerometer, Bluetooth 5.0. Flash with <code style="font-family:'JetBrains Mono',monospace;font-size:13px">pio run -t upload</code>.</p>
+  <div class="photos-row">
+    <figure class="photo-card">
+      <img src="docs/device.jpg" alt="M5StickC Plus showing the gr0m character on-screen" loading="lazy">
+      <figcaption>M5StickC Plus running gr0m firmware</figcaption>
+    </figure>
+    <figure class="photo-card">
+      <img src="docs/menu.png" alt="M5StickC Plus showing the device menu screen" loading="lazy">
+      <figcaption>Menu screen — original firmware</figcaption>
+    </figure>
+    <figure class="photo-card" style="background:#2a2520">
+      <img src="docs/hardware-buddy-window.png" alt="Claude Desktop Hardware Buddy pairing window — original design before redesign" loading="lazy" style="height:220px;object-fit:contain;background:#2a2520">
+      <figcaption>Hardware Buddy window — original design (before redesign)</figcaption>
+    </figure>
+  </div>
+</section>
+
+<footer>
+  <p><a href="https://github.com/MichaelAdamGroberman/claude-dev-hardware" rel="noopener">claude-dev-hardware</a> · M5StickC Plus · gr0m · Claude Desktop Hardware Buddy</p>
+  <p style="margin-top:6px">Flash with <code>pio run -t upload</code> after dropping the firmware-patch files into src/</p>
+</footer>
+
+<!-- ════════════════════════════════════════════════════════════
+     All dynamic content below uses the SVG namespace API only
+     (createElementNS). No innerHTML assignment anywhere.
+════════════════════════════════════════════════════════════ -->
+<script>
+// All SVG/HTML is built with DOM APIs.
+// "innerHTML" string appears nowhere in this script as an assignment.
+
+const NS = 'http://www.w3.org/2000/svg';
+const H  = 'http://www.w3.org/1999/xhtml';
+
+// ── SVG primitive helpers ─────────────────────────────────────
+function svgEl(tag, attrs) {
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+function pxEl(x,y,w,h,fill,extra) {
+  const r = svgEl('rect', {x,y,width:w,height:h,fill});
+  if (extra) for (const [k,v] of Object.entries(extra)) r.setAttribute(k,v);
+  return r;
+}
+function ciEl(cx,cy,r,fill,extra) {
+  const c = svgEl('circle', {cx,cy,r,fill});
+  if (extra) for (const [k,v] of Object.entries(extra)) c.setAttribute(k,v);
+  return c;
+}
+function lineEl(x1,y1,x2,y2,attrs) {
+  return svgEl('line', {x1,y1,x2,y2,...attrs});
+}
+function polyEl(tag, points, attrs) {
+  return svgEl(tag, {points, ...attrs});
+}
+function gEl(...children) {
+  const g = svgEl('g',{});
+  children.forEach(c => { if (c) g.appendChild(c); });
+  return g;
+}
+function textEl(x,y,txt,attrs) {
+  const t = svgEl('text', {x,y,...attrs});
+  t.textContent = txt;
+  return t;
+}
+function pathEl(d, attrs) {
+  return svgEl('path', {d, ...attrs});
+}
+
+// ── gr0m palette ──────────────────────────────────────────────
+const C = {
+  chassis:'#c5c7c6', chassisHi:'#efefef', chassisSh:'#7a7c7b',
+  chassisDk:'#4a4d4c', steel:'#2c2e30', ink:'#0a0b0c', rivet:'#1a1c1e',
+  spec:'#ffffff', crimson:'#ff2a1a', emberHot:'#ffb02e', leaf:'#2b8f1f',
+  heart:'#ff2d92', visorIdle:'#00bdff', visorBusy:'#29d65b',
+  visorAlert:'#ff2a1a', visorLove:'#ff2d92', visorOff:'#283038',
+  joint:'#f4ddb5', jointBand:'#a8895f',
+  smoke1:'#dadddf', smoke2:'#8b8f93', smoke3:'#4a4e54',
+};
+const VISOR = {
+  sleep:C.visorOff, idle:C.visorIdle, busy:C.visorBusy,
+  attention:C.visorAlert, celebrate:C.visorIdle, dizzy:C.visorOff, heart:C.visorLove
+};
+
+// ── Shape builders ────────────────────────────────────────────
+function buildHead() {
+  return gEl(
+    pxEl(42,38,50,36,C.chassisDk,{rx:4}),
+    pxEl(40,32,54,46,C.chassis,{rx:6}),
+    pxEl(44,34,46,2,C.chassisHi),
+    pxEl(42,36,2,42,C.chassisHi,{opacity:'0.7'}),
+    pxEl(90,36,2,42,C.chassisSh),
+    pxEl(44,76,46,2,C.chassisSh),
+    pxEl(50,38,6,2,C.chassisSh), pxEl(62,38,6,2,C.chassisSh), pxEl(74,38,6,2,C.chassisSh),
+    pxEl(43,35,2,2,C.rivet), pxEl(89,35,2,2,C.rivet),
+    pxEl(43,73,2,2,C.rivet), pxEl(89,73,2,2,C.rivet),
+    pxEl(46,44,1,22,C.chassisSh), pxEl(87,44,1,22,C.chassisSh)
+  );
+}
+
+function buildVisor(color, pupilX) {
+  const bx=47,by=47,w=40,h=10;
+  const px2 = Math.max(bx+2, Math.min(bx+w-4, 67+(pupilX||0)));
+  return gEl(
+    pxEl(bx-1,by-1,w+2,h+2,C.steel),
+    pxEl(bx,by,w,h,color),
+    pxEl(bx+2,by+5,w-4,1,C.steel,{opacity:'0.5'}),
+    pxEl(px2-1,by+2,3,h-4,C.spec),
+    pxEl(bx+2,by+1,1,1,C.spec),
+    pxEl(bx+w-3,by+1,1,1,C.spec)
+  );
+}
+
+function buildSunglasses() {
+  return gEl(
+    ciEl(55,52,9,C.ink),
+    ciEl(79,52,9,C.ink),
+    ciEl(55,52,9,'none',{'stroke':C.steel,'stroke-width':'1.5'}),
+    ciEl(79,52,9,'none',{'stroke':C.steel,'stroke-width':'1.5'}),
+    pxEl(63,51,8,3,C.steel),
+    pxEl(51,48,2,1,C.spec), pxEl(75,48,2,1,C.spec)
+  );
+}
+
+function buildMouth(m) {
+  const cx=67,cy=69;
+  if (m===0) {
+    const g = svgEl('g',{});
+    for (let i=0;i<4;i++) g.appendChild(pxEl(cx-8,cy-3+i*2,16,1,C.chassisSh));
+    return g;
+  }
+  if (m===1) return pxEl(cx-7,cy,14,2,C.chassisSh);
+  if (m===2) return polyEl('polyline',`${cx-8},${cy-1} ${cx-1},${cy+3} ${cx+1},${cy+3} ${cx+8},${cy-1}`,{'stroke':C.chassisSh,'stroke-width':'1.5','fill':'none'});
+  if (m===3) {
+    const pts=[]; for(let i=-8;i<=8;i+=2) pts.push(`${cx+i},${cy+((i/2)&1?-1:1)}`);
+    return polyEl('polyline',pts.join(' '),{'stroke':C.chassisSh,'stroke-width':'1.4','fill':'none'});
+  }
+  if (m===4) return gEl(ciEl(cx,cy+1,4,C.ink),ciEl(cx,cy+1,4,'none',{'stroke':C.chassisSh,'stroke-width':'1'}));
+  if (m===6) return gEl(
+    lineEl(cx-5,cy-2,cx+5,cy+3,{'stroke':C.chassisSh,'stroke-width':'1.4'}),
+    lineEl(cx-5,cy+3,cx+5,cy-2,{'stroke':C.chassisSh,'stroke-width':'1.4'})
+  );
+  if (m===7) return gEl(
+    pathEl(`M${cx-4} ${cy} Q${cx} ${cy+3} ${cx+4} ${cy}`,{'stroke':C.chassisSh,'stroke-width':'1.4','fill':'none'}),
+    ciEl(cx-11,cy+2,1.5,C.heart), ciEl(cx+11,cy+2,1.5,C.heart)
+  );
+  return svgEl('g',{});
+}
+
+function buildNeck() {
+  return gEl(
+    polyEl('polygon','64,77 70,77 73,85 61,85',{fill:C.chassisSh}),
+    lineEl(64,77,61,85,{'stroke':C.chassisHi,'stroke-width':'0.8'})
+  );
+}
+
+function buildChest(boltColor, lcdText) {
+  const g = svgEl('g',{});
+  g.appendChild(pxEl(45,85,44,22,C.chassis,{rx:3}));
+  g.appendChild(pxEl(45,85,44,1,C.chassisHi));
+  g.appendChild(pxEl(45,106,44,1,C.chassisSh));
+  for (let i=0;i<3;i++) g.appendChild(pxEl(48+i*3,91,1,10,C.chassisSh));
+  for (let i=0;i<3;i++) g.appendChild(pxEl(85-i*3,91,1,10,C.chassisSh));
+  if (lcdText) {
+    g.appendChild(pxEl(58,89,18,9,'#020308'));
+    g.appendChild(pxEl(58,89,18,1,'#0a3a18'));
+    g.appendChild(textEl(67,96,lcdText,{'text-anchor':'middle','font-family':'Silkscreen,monospace','font-size':'7','fill':'#5cff7a'}));
+  } else {
+    const bolt1 = polyEl('polygon','69,89 65,89 64,96 67,96 65,103 71,94 68,94 70,89',{fill:boltColor,opacity:'0.4',transform:'translate(0.5 0.5)'});
+    const bolt2 = polyEl('polygon','69,89 65,89 64,96 67,96 65,103 71,94 68,94 70,89',{fill:boltColor});
+    g.appendChild(bolt1); g.appendChild(bolt2);
+  }
+  return g;
+}
+
+function buildAntenna(color, sway) {
+  const tipX=67+(sway||0), tipY=22;
+  const g = svgEl('g',{});
+  g.appendChild(lineEl(67,32,tipX,tipY,{'stroke':C.chassisSh,'stroke-width':'1.5'}));
+  if (color) {
+    g.appendChild(ciEl(tipX,tipY,4,color,{opacity:'0.25'}));
+    g.appendChild(ciEl(tipX,tipY,3,color));
+    g.appendChild(ciEl(tipX,tipY,3,'none',{'stroke':C.spec,'stroke-width':'0.5'}));
+    g.appendChild(pxEl(tipX-1,tipY-1,1,1,C.spec));
+  } else {
+    g.appendChild(ciEl(tipX,tipY,3,'none',{'stroke':C.chassisSh,'stroke-width':'1'}));
+  }
+  return g;
+}
+
+function buildJoint(drop) {
+  drop = drop || 0;
+  return gEl(
+    pxEl(75,68+drop,20,3,C.joint),
+    pxEl(75,68+drop,20,1,'#fff4d6',{opacity:'0.5'}),
+    pxEl(75,70+drop,20,1,C.jointBand,{opacity:'0.4'}),
+    pxEl(75,68+drop,4,3,C.jointBand),
+    ciEl(97,69+drop,2,C.emberHot),
+    pxEl(98,67+drop,1,1,'#ffd06a')
+  );
+}
+
+function buildSmoke() {
+  const g = svgEl('g',{});
+  const fromX=95, fromY=68;
+  for (let i=0;i<6;i++) {
+    const yOff=-6-i*5, xOff=Math.sin(i*1.3)*4, r=2+i*0.6;
+    const col=i<2?C.smoke1:i<4?C.smoke2:C.smoke3;
+    g.appendChild(ciEl(fromX+xOff,fromY+yOff,r,col,{opacity:String(1-i/6*0.5)}));
+  }
+  return g;
+}
+
+function buildParticles(count) {
+  const baseX=24; const g=svgEl('g',{});
+  for (let i=0;i<count;i++) {
+    const y=80-i*9, morph=i>=Math.floor(count/2), x=baseX+((i&1)?2:-2);
+    if (morph) {
+      g.appendChild(gEl(
+        polyEl('polygon','0,-3 -2,1 2,1',{fill:C.leaf,transform:`translate(${x} ${y})`}),
+        pxEl(x,y+2,1,2,C.leaf)
+      ));
+    } else {
+      const sub=svgEl('g',{}); sub.setAttribute('transform',`translate(${x} ${y})`);
+      sub.appendChild(ciEl(-2,-1,2,C.heart)); sub.appendChild(ciEl(2,-1,2,C.heart));
+      sub.appendChild(polyEl('polygon','-3,0 3,0 0,4',{fill:C.heart}));
+      g.appendChild(sub);
+    }
+  }
+  return g;
+}
+
+function buildHearts() {
+  const pos=[[18,50],[28,28],[10,90],[110,38],[118,70],[102,100]];
+  const g=svgEl('g',{});
+  pos.forEach(([x,y],i)=>{
+    const sub=svgEl('g',{}); sub.setAttribute('transform',`translate(${x} ${y}) scale(${0.7+(i%3)*0.2})`);
+    sub.appendChild(ciEl(-2,-1,2,C.heart)); sub.appendChild(ciEl(2,-1,2,C.heart));
+    sub.appendChild(polyEl('polygon','-3,0 3,0 0,5',{fill:C.heart}));
+    g.appendChild(sub);
+  });
+  return g;
+}
+
+function buildConfetti() {
+  const cols=['#ff2d92','#ffd60a','#00bdff','#29d65b','#ff8c1a'];
+  const pos=[[20,30],[110,25],[16,60],[114,55],[25,95],[108,90],[12,110],[120,75],[30,20],[100,110],[8,80],[122,40]];
+  const g=svgEl('g',{});
+  pos.forEach(([x,y],i)=>{
+    const c=cols[i%5];
+    if (i%2===0) { const r=pxEl(x,y,2,3,c); r.setAttribute('transform',`rotate(${i*15} ${x+1} ${y+1.5})`); g.appendChild(r); }
+    else g.appendChild(ciEl(x,y,1.5,c));
+  });
+  return g;
+}
+
+function buildPartyHat() {
+  return gEl(
+    polyEl('polygon','67,12 56,32 78,32',{fill:C.crimson}),
+    polyEl('polygon','67,12 56,32 78,32',{fill:'none',stroke:'#222','stroke-width':'0.5'}),
+    lineEl(62,22,73,22,{stroke:'#fff','stroke-width':'1'}),
+    lineEl(59,28,76,28,{stroke:'#fff','stroke-width':'1'}),
+    ciEl(67,11,3,'#ffd60a'),
+    pxEl(66,10,1,1,'#fff')
+  );
+}
+
+function buildNightcap() {
+  return gEl(
+    pathEl('M 42 36 Q 55 14 88 36 Q 80 30 60 30 Q 50 30 42 36 Z',{fill:C.visorLove}),
+    pxEl(42,34,48,3,'#ffffff'),
+    ciEl(88,20,4,'#ffffff'),
+    ciEl(86,19,1,'#dddddd')
+  );
+}
+
+function buildZzz() {
+  const g=svgEl('g',{'font-family':'Silkscreen,monospace',fill:C.spec});
+  g.appendChild(textEl(100,30,'z',{'font-size':'10'}));
+  g.appendChild(textEl(106,22,'Z',{'font-size':'13'}));
+  g.appendChild(textEl(114,14,'Z',{'font-size':'16'}));
+  return g;
+}
+
+function buildSpeechBubble(text, color, bx, by) {
+  color = color || C.visorAlert; bx = bx||95; by = by||24;
+  const w = Math.max(20, text.length*6+8);
+  const g = svgEl('g',{});
+  g.appendChild(pxEl(bx,by,w,14,'#ffffff'));
+  g.appendChild(pxEl(bx-1,by+1,1,12,'#ffffff'));
+  g.appendChild(pxEl(bx+w,by+1,1,12,'#ffffff'));
+  g.appendChild(pxEl(bx+1,by-1,w-2,1,'#ffffff'));
+  g.appendChild(pxEl(bx+1,by+14,w-2,1,'#ffffff'));
+  g.appendChild(polyEl('polygon',`${bx+6},${by+14} ${bx+11},${by+14} ${bx+4},${by+20}`,{fill:'#ffffff'}));
+  g.appendChild(textEl(bx+w/2,by+11,text,{'text-anchor':'middle','font-family':'Silkscreen,monospace','font-size':'10','font-weight':'700',fill:color}));
+  return g;
+}
+
+function buildHands(pose) {
+  const left  = pose==='wide'?{x:30,y:92}:pose==='type'?{x:50,y:110}:{x:38,y:98};
+  const right = pose==='wide'?{x:96,y:92}:pose==='type'?{x:79,y:110}:{x:90,y:98};
+  return gEl(
+    pxEl(left.x+4,left.y-1,6,4,C.chassisSh),
+    ciEl(left.x+2,left.y+1,3,C.chassis),
+    pxEl(left.x,left.y-1,2,2,C.chassisHi,{opacity:'0.5'}),
+    pxEl(right.x-4,right.y-1,6,4,C.chassisSh),
+    ciEl(right.x+2,right.y+1,3,C.chassis)
+  );
+}
+
+function buildLaptop() {
+  const g=svgEl('g',{});
+  g.appendChild(pxEl(48,114,38,3,'#3a3d40'));
+  g.appendChild(pxEl(47,117,40,1,'#1a1d20'));
+  for(let i=0;i<8;i++) g.appendChild(pxEl(50+i*4.5,115,3,1,'#7a7d80'));
+  g.appendChild(pxEl(50,113,34,1,'#5a5d60'));
+  g.appendChild(pxEl(51,102,32,12,'#1a1d20'));
+  g.appendChild(pxEl(52,103,30,10,'#0f8a3a'));
+  g.appendChild(pxEl(54,105,6,1,'#1a4a22')); g.appendChild(pxEl(62,105,4,1,'#1a4a22'));
+  g.appendChild(pxEl(54,107,3,1,'#1a4a22')); g.appendChild(pxEl(59,107,8,1,'#1a4a22'));
+  g.appendChild(pxEl(54,109,10,1,'#1a4a22')); g.appendChild(pxEl(66,109,2,1,'#1a4a22'));
+  g.appendChild(pxEl(70,111,2,1,'#a4ffb4'));
+  return g;
+}
+
+function buildHeadphones() {
+  return gEl(
+    pathEl('M 44 38 Q 67 24 90 38',{'stroke':C.steel,'stroke-width':'2.5','fill':'none'}),
+    pathEl('M 44 38 Q 67 24 90 38',{'stroke':'#5a5d60','stroke-width':'1','fill':'none'}),
+    pxEl(38,44,6,10,C.steel), pxEl(90,44,6,10,C.steel),
+    pxEl(38,45,1,8,'#5a5d60'),
+    pxEl(43,47,1,4,C.crimson), pxEl(90,47,1,4,C.crimson)
+  );
+}
+
+function buildDesk() {
+  return gEl(
+    pxEl(20,132,94,2,'#6b4a2a'), pxEl(20,134,94,1,'#3a2818'),
+    pxEl(28,126,8,6,'#ffffff'), pxEl(28,126,8,1,'#222'), pxEl(28,131,8,1,'#222'),
+    pxEl(36,127,2,3,'#ffffff'), pxEl(37,127,1,3,'#222'),
+    pxEl(29,127,6,1,'#3a1808'),
+    pxEl(30,122,1,2,'#dadddf',{opacity:'0.7'}),
+    pxEl(32,120,1,2,'#dadddf',{opacity:'0.5'}),
+    pxEl(34,123,1,1,'#dadddf',{opacity:'0.7'})
+  );
+}
+
+function buildShadow() {
+  return svgEl('ellipse',{cx:67,cy:138,rx:26,ry:3,fill:'#000',opacity:'0.45'});
+}
+
+// ── Main gr0m SVG builder ─────────────────────────────────────
+function makeGr0m(opts) {
+  const o = Object.assign({
+    mood:'idle', vb:'0 0 135 160', w:135, h:160,
+    pupil:0, sway:0, ledOn:false,
+    sg:true, sj:true, ss:true,
+    hands:null, laptop:false, headphones:false,
+    partyHat:false, nightcap:false, zzz:false,
+    confetti:false, hearts:false, bubble:null,
+    lcdText:'', desk:false, particles:0, shadow:true, bg:'transparent'
+  }, opts);
+
+  const vc = VISOR[o.mood] || C.visorIdle;
+  const ledColor = o.ledOn
+    ? (o.mood==='attention'||o.mood==='busy' ? vc : o.mood==='heart' ? C.heart : C.crimson)
+    : null;
+  const mouthMap={sleep:1,idle:0,busy:3,attention:4,celebrate:2,dizzy:6,heart:7};
+  const m = mouthMap[o.mood] ?? 0;
+
+  const svg = svgEl('svg', {viewBox:o.vb, width:o.w, height:o.h,
+    style:`display:block;background:${o.bg};image-rendering:pixelated`,
+    'shape-rendering':'crispEdges'});
+
+  if (o.particles>0) svg.appendChild(buildParticles(o.particles));
+  if (o.hearts) svg.appendChild(buildHearts());
+  if (o.confetti) svg.appendChild(buildConfetti());
+  if (o.shadow) svg.appendChild(buildShadow());
+  if (o.bubble) svg.appendChild(buildSpeechBubble(o.bubble.text, o.bubble.color, o.bubble.x, o.bubble.y));
+  if (o.sj && o.ss && !o.nightcap) svg.appendChild(buildSmoke());
+  svg.appendChild(buildChest(vc, o.lcdText));
+  svg.appendChild(buildNeck());
+  if (o.hands) svg.appendChild(buildHands(o.hands));
+  if (o.laptop) svg.appendChild(buildLaptop());
+  svg.appendChild(buildHead());
+  svg.appendChild(buildVisor(vc, o.pupil));
+  if (o.sg) svg.appendChild(buildSunglasses());
+  svg.appendChild(buildMouth(m));
+  if (o.sj && !o.nightcap) svg.appendChild(buildJoint(o.mood==='sleep'?2:0));
+  svg.appendChild(buildAntenna(ledColor, o.sway));
+  if (o.headphones) svg.appendChild(buildHeadphones());
+  if (o.partyHat) svg.appendChild(buildPartyHat());
+  if (o.nightcap) svg.appendChild(buildNightcap());
+  if (o.zzz) svg.appendChild(buildZzz());
+  if (o.desk) svg.appendChild(buildDesk());
+  return svg;
+}
+
+// ── M5StickC Plus DOM builder ─────────────────────────────────
+function makeM5(scale, screenNode, ledOn) {
+  const sW=135,sH=240,padTop=22,padSide=18,padBot=96;
+  const bW=sW+padSide*2, bH=sH+padTop+padBot;
+
+  function div(style) { const d=document.createElement('div'); Object.assign(d.style,style); return d; }
+
+  const outer = div({width:bW*scale+'px',height:bH*scale+'px',position:'relative'});
+  const body = div({
+    position:'relative',width:bW+'px',height:bH+'px',
+    transform:`scale(${scale})`,transformOrigin:'top left',
+    background:'linear-gradient(155deg,#f76958 0%,#df463a 32%,#c4322a 55%,#a02a20 85%,#7d1e16 100%)',
+    borderRadius:'18px',
+    boxShadow:'inset 0 2px 0 rgba(255,255,255,0.25),inset 0 -3px 0 rgba(20,8,4,0.45),inset 2px 0 0 rgba(255,200,180,0.10),inset -2px 0 0 rgba(20,8,4,0.20),0 18px 36px -16px rgba(140,30,20,0.6),0 6px 18px -8px rgba(0,0,0,0.5)'
+  });
+
+  const bezel = div({
+    position:'absolute',top:(padTop-6)+'px',left:(padSide-6)+'px',
+    width:(sW+12)+'px',height:(sH+12)+'px',
+    background:'#0a0c0e',borderRadius:'6px',
+    boxShadow:'inset 0 1px 2px rgba(0,0,0,0.9),inset 0 -1px 0 rgba(255,255,255,0.06)'
+  });
+
+  const screen = div({
+    position:'absolute',top:padTop+'px',left:padSide+'px',
+    width:sW+'px',height:sH+'px',background:'#000',overflow:'hidden',
+    boxShadow:'inset 0 0 0 1px #050608,inset 0 0 12px rgba(0,0,0,0.8)'
+  });
+  screen.appendChild(screenNode);
+
+  const btnA = div({
+    position:'absolute',left:'50%',transform:'translateX(-50%)',
+    bottom:'36px',width:'44px',height:'30px',borderRadius:'6px',
+    background:'linear-gradient(180deg,#ff9a70 0%,#ed5b41 45%,#b73220 100%)',
+    boxShadow:'inset 0 2px 0 rgba(255,255,255,0.45),inset 0 -3px 0 rgba(40,10,4,0.55),0 2px 0 rgba(20,8,4,0.6)'
+  });
+  const btnPwr = div({
+    position:'absolute',left:'-3px',top:(padTop+36)+'px',width:'5px',height:'22px',
+    borderRadius:'2px',background:'linear-gradient(180deg,#ed5b41,#9a261a)',
+    boxShadow:'inset 0 1px 0 rgba(255,255,255,0.35),inset 0 -1px 0 rgba(0,0,0,0.4)'
+  });
+  const btnB = div({
+    position:'absolute',right:'-3px',top:(padTop+60)+'px',width:'5px',height:'26px',
+    borderRadius:'2px',background:'linear-gradient(180deg,#ed5b41,#9a261a)',
+    boxShadow:'inset 0 1px 0 rgba(255,255,255,0.35),inset 0 -1px 0 rgba(0,0,0,0.4)'
+  });
+  const usb = div({
+    position:'absolute',left:'50%',transform:'translateX(-50%)',bottom:'-3px',
+    width:'28px',height:'5px',borderRadius:'2px',background:'#1a0a06',
+    boxShadow:'inset 0 1px 1px #000'
+  });
+  const led = div({
+    position:'absolute',top:(padTop-12)+'px',left:(padSide+4)+'px',
+    width:'5px',height:'5px',borderRadius:'50%',
+    background:ledOn?'#ff2f2f':'#2a0a08',
+    boxShadow:ledOn?'0 0 6px 1px #ff2f2f,0 0 12px 2px rgba(255,47,47,0.4)':'inset 0 0 2px rgba(0,0,0,0.8)'
+  });
+
+  // speaker dots
+  const spk = div({position:'absolute',top:(padTop-12)+'px',right:(padSide+4)+'px',width:'30px',height:'4px',display:'flex',justifyContent:'space-between'});
+  for(let i=0;i<6;i++){
+    const d=div({width:'2px',height:'2px',borderRadius:'1px',background:'#7d1e16',boxShadow:'inset 0 1px 0 rgba(0,0,0,0.4)'});
+    spk.appendChild(d);
+  }
+
+  const logo = div({position:'absolute',left:'50%',transform:'translateX(-50%)',bottom:'6px',
+    fontFamily:'"Silkscreen",monospace',fontWeight:'700',fontSize:'13px',letterSpacing:'1px',
+    color:'#7d1e16',textShadow:'0 1px 0 rgba(255,255,255,0.18)'});
+  logo.textContent = 'M5';
+
+  [bezel,screen,btnA,btnPwr,btnB,usb,led,spk,logo].forEach(el => body.appendChild(el));
+  outer.appendChild(body);
+  return outer;
+}
+
+// ── Screen content builders (return DOM nodes) ────────────────
+function mkDiv(cls, style) {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  if (style) Object.assign(d.style, style);
+  return d;
+}
+function mkSpan(cls, style) {
+  const s = document.createElement('span');
+  if (cls) s.className = cls;
+  if (style) Object.assign(s.style, style);
+  return s;
+}
+function tx(el, text) { el.textContent = text; return el; }
+
+function batDOM(pct,w,h) {
+  w=w||18; h=h||9; pct=pct||87;
+  const fw=Math.max(2,Math.round(((w-4)*pct)/100));
+  const col=pct<15?'#ff2a1a':pct<35?'#ff8c1a':'#29d65b';
+  const wrap=document.createElement('span'); wrap.className='battery-icon';
+  const shell=document.createElement('span'); shell.className='bat-shell';
+  Object.assign(shell.style,{width:w+'px',height:h+'px'});
+  const fill=document.createElement('span'); fill.className='bat-fill';
+  Object.assign(fill.style,{width:fw+'px',height:(h-4)+'px',background:col});
+  shell.appendChild(fill);
+  const tip=document.createElement('span'); tip.className='bat-tip';
+  Object.assign(tip.style,{width:'2px',height:(h-4)+'px'});
+  wrap.appendChild(shell); wrap.appendChild(tip);
+  return wrap;
+}
+
+function dotDOM(color,size) {
+  size=size||5;
+  const s=document.createElement('span'); s.className='scr-dot';
+  Object.assign(s.style,{width:size+'px',height:size+'px',background:color,boxShadow:`0 0 ${size*.8}px ${color}88`});
+  return s;
+}
+
+function gr0mPeekNode(mood,size) {
+  return makeGr0m({mood,w:size||32,h:size||32,vb:'36 28 60 56',shadow:false,sj:false,
+    sg:mood==='idle',lcdText:'',desk:false,particles:0});
+}
+
+function scrHdrNode(name, dotColor, statusTxt, batPct) {
+  const hdr=mkDiv('scr-hdr');
+  const nm=mkDiv('scr-name'); nm.textContent=name; hdr.appendChild(nm);
+  const st=mkDiv('scr-st');
+  st.appendChild(dotDOM(dotColor,5));
+  const sl=document.createElement('span'); sl.textContent=statusTxt; sl.style.color=dotColor; st.appendChild(sl);
+  const sp=document.createElement('span'); sp.style.width='4px'; st.appendChild(sp);
+  st.appendChild(batDOM(batPct,18,9));
+  hdr.appendChild(st);
+  return hdr;
+}
+
+// Screen 1: HOME IDLE
+function buildScreenHomeIdle() {
+  const root=mkDiv('scr');
+  root.appendChild(scrHdrNode('gr0m','#00bdff','IDLE',87));
+  const buddy=mkDiv('scr-buddy'); buddy.style.height='110px';
+  buddy.appendChild(makeGr0m({mood:'idle',w:135,h:116,vb:'0 18 135 116',pupil:-2,particles:2}));
+  root.appendChild(buddy);
+  const body=mkDiv('scr-body'); body.style.borderTop='1px solid #1a1c1e';
+  const lbl=mkDiv('scr-lbl'); lbl.textContent='TOKENS TODAY'; body.appendChild(lbl);
+  const big=mkDiv('scr-big'); big.textContent='31.2';
+  const k=document.createElement('span'); k.className='scr-big-k'; k.textContent='K';
+  big.appendChild(k); body.appendChild(big);
+  root.appendChild(body);
+  return root;
+}
+
+// Screen 2: HOME WORKING
+function buildScreenHomeWorking() {
+  const root=mkDiv('scr');
+  root.appendChild(scrHdrNode('gr0m','#29d65b','BUSY',64));
+  const buddy=mkDiv('scr-buddy'); buddy.style.height='110px';
+  buddy.appendChild(makeGr0m({mood:'busy',w:135,h:116,vb:'0 22 135 120',
+    sg:false,sj:false,headphones:true,hands:'type',laptop:true,shadow:false}));
+  root.appendChild(buddy);
+  const sess=mkDiv('scr-sess');
+  [['RUN','3','#29d65b',1],['WAIT','0','#fff',1],['TOK','184K','#ff8c1a',1.4]].forEach(([l,v,c,f])=>{
+    const cell=mkDiv('scr-sc'); cell.style.flex=f;
+    const sl=mkDiv(); sl.className='sl'; sl.textContent=l; cell.appendChild(sl);
+    const sv=mkDiv(); sv.className='sv'; sv.textContent=v; sv.style.color=c; cell.appendChild(sv);
+    sess.appendChild(cell);
+  });
+  root.appendChild(sess);
+  const tr=mkDiv('scr-tr');
+  const t1=mkDiv(); t1.className='tl'; t1.textContent='git push'; tr.appendChild(t1);
+  const t2=mkDiv(); t2.className='td'; t2.textContent='yarn test'; tr.appendChild(t2);
+  root.appendChild(tr);
+  return root;
+}
+
+// Screen 3: APPROVAL
+function buildScreenApproval() {
+  const root=mkDiv('scr');
+  const alarm=mkDiv('scr-alarm');
+  const left=document.createElement('div'); left.style.cssText='display:flex;align-items:center;gap:5px';
+  left.appendChild(gr0mPeekNode('attention',20));
+  const at=document.createElement('span'); at.textContent='APPROVE?'; at.style.fontSize='12px'; left.appendChild(at);
+  alarm.appendChild(left);
+  const ts=document.createElement('span'); ts.textContent='3s'; ts.style.fontSize='12px'; alarm.appendChild(ts);
+  root.appendChild(alarm);
+  const tb=mkDiv('scr-tool-b');
+  const tl=mkDiv('scr-tool-l'); tl.textContent='TOOL'; tb.appendChild(tl);
+  const tn=mkDiv('scr-tool-n'); tn.textContent='Bash'; tb.appendChild(tn);
+  root.appendChild(tb);
+  const divr=document.createElement('div'); divr.style.cssText='height:1px;background:#1a1c1e;margin:0 6px'; root.appendChild(divr);
+  const cmd=mkDiv('scr-cmd-a');
+  const cl=mkDiv('scr-cmd-l'); cl.textContent='RUNNING'; cmd.appendChild(cl);
+  const ct=mkDiv('scr-cmd-t'); ct.textContent='rm -rf /tmp/foo'; cmd.appendChild(ct);
+  root.appendChild(cmd);
+  const act=mkDiv('scr-act-row');
+  const allow=mkDiv('scr-allow');
+  const ai=mkDiv('scr-ai'); ai.textContent='✓'; allow.appendChild(ai);
+  const al=mkDiv('scr-al'); al.textContent='ALLOW'; allow.appendChild(al);
+  const deny=mkDiv('scr-deny');
+  const di=mkDiv('scr-ai'); di.textContent='✗'; deny.appendChild(di);
+  const dl=mkDiv('scr-al'); dl.textContent='DENY'; deny.appendChild(dl);
+  act.appendChild(allow); act.appendChild(deny);
+  root.appendChild(act);
+  return root;
+}
+
+// Screen 4: PET
+function buildScreenPet() {
+  const root=mkDiv('scr');
+  const hdr=mkDiv('scr-pet-hdr');
+  hdr.appendChild(gr0mPeekNode('heart',22));
+  const info=mkDiv(); info.style.flex='1';
+  const n=mkDiv(); n.style.cssText='font-size:11px;font-weight:700'; n.textContent='gr0m'; info.appendChild(n);
+  const s=mkDiv(); s.style.cssText='font-size:8px;color:#7a8492;margin-top:1px'; s.textContent="MICHAEL'S"; info.appendChild(s);
+  hdr.appendChild(info);
+  const pg=mkDiv(); pg.style.cssText='font-size:9px;color:#7a8492'; pg.textContent='1/2'; hdr.appendChild(pg);
+  root.appendChild(hdr);
+
+  const body=mkDiv('scr-pet-body');
+  const lv=mkDiv('lv-chip');
+  const lvl=document.createElement('span'); lvl.className='lv-label'; lvl.textContent='LV ';
+  const lvn=document.createElement('span'); lvn.className='lv-num'; lvn.textContent='5';
+  lv.appendChild(lvl); lv.appendChild(lvn); body.appendChild(lv);
+
+  function meterRow(label, val, max, color, isBar) {
+    const row=mkDiv(); row.style.cssText='margin-top:4px';
+    const top=mkDiv(); top.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:2px';
+    const tl=document.createElement('span'); tl.style.cssText='font-size:9px;color:#7a8492;letter-spacing:.5px'; tl.textContent=label;
+    const tv=document.createElement('span'); tv.style.cssText=`font-size:8px;color:${color}`; tv.textContent=`${val}/${max}`;
+    top.appendChild(tl); top.appendChild(tv); row.appendChild(top);
+    const track=mkDiv(); track.style.cssText='display:flex;gap:2px';
+    for(let i=0;i<max;i++){
+      const seg=document.createElement('span');
+      if (isBar) {
+        seg.className='mini-bar';
+        Object.assign(seg.style,{width:`${Math.floor(115/max)}px`,height:'7px',background:i<val?color:'transparent',border:i<val?'none':'1px solid #262a32'});
+      } else {
+        seg.className='mini-dot';
+        Object.assign(seg.style,{width:'5px',height:'5px',background:i<val?color:'transparent',border:i<val?'none':'1px solid #3a3f48'});
+      }
+      track.appendChild(seg);
+    }
+    row.appendChild(track);
+    return row;
+  }
+  body.appendChild(meterRow('FED',7,10,'#ff8c1a',false));
+  body.appendChild(meterRow('ENERGY',4,5,'#29d65b',true));
+
+  const divr=mkDiv(); divr.style.cssText='height:1px;background:#1a1c1e;margin:4px 0'; body.appendChild(divr);
+  const grid=mkDiv('s2x2');
+  [['APPROVED','42','#29d65b'],['DENIED','3','#ff6e5b'],['TOKENS','184K','#fff'],['NAPPED','2h14','#00bdff']].forEach(([l,v,c])=>{
+    const cell=mkDiv();
+    const cl=mkDiv('s2x2-l'); cl.textContent=l; cell.appendChild(cl);
+    const cv=mkDiv('s2x2-v'); cv.textContent=v; cv.style.color=c; cell.appendChild(cv);
+    grid.appendChild(cell);
+  });
+  body.appendChild(grid);
+  root.appendChild(body);
+  return root;
+}
+
+// Screen 5: MENU
+function buildScreenMenu() {
+  const root=mkDiv('scr');
+  const items=['settings','turn off','help','about','demo','close'];
+  const hdr=mkDiv('scr-menu-hdr');
+  const t=mkDiv(); t.style.cssText='font-size:12px;font-weight:700;letter-spacing:1px'; t.textContent='MENU'; hdr.appendChild(t);
+  const p=mkDiv(); p.style.cssText='font-size:9px;color:#7a8492'; p.textContent=`1/${items.length}`; hdr.appendChild(p);
+  root.appendChild(hdr);
+  const list=mkDiv(); list.style.cssText='flex:1;min-height:0;overflow:hidden;padding:2px 0';
+  items.forEach((it,i)=>{
+    const row=mkDiv(`scr-mi${i===0?' act':''}`);
+    const left=document.createElement('span'); left.style.cssText='display:flex;align-items:center;gap:5px';
+    const arrow=document.createElement('span'); arrow.style.cssText=`width:7px;color:${i===0?'#000':'#7a8492'}`; arrow.textContent=i===0?'▸':'';
+    left.appendChild(arrow); left.appendChild(document.createTextNode(it));
+    row.appendChild(left);
+    if (it==='demo') { const m=document.createElement('span'); m.style.cssText=`font-size:10px;color:${i===0?'#000':'#7a8492'}`; m.textContent='off'; row.appendChild(m); }
+    list.appendChild(row);
+  });
+  root.appendChild(list);
+  return root;
+}
+
+// Screen 6: BLUETOOTH
+function buildScreenBluetooth() {
+  const root=mkDiv('scr');
+  const hdr=mkDiv('scr-hdr');
+  const nm=mkDiv('scr-name'); nm.style.letterSpacing='1px'; nm.textContent='BLUETOOTH'; hdr.appendChild(nm);
+  const p=mkDiv(); p.style.cssText='font-size:9px;color:#7a8492'; p.textContent='5/6'; hdr.appendChild(p);
+  root.appendChild(hdr);
+  const body=mkDiv('scr-bt-body');
+  const linked=mkDiv(); linked.style.cssText='font-size:22px;font-weight:700;color:#29d65b'; linked.textContent='LINKED'; body.appendChild(linked);
+  const enc=mkDiv(); enc.style.cssText='display:flex;align-items:center;gap:4px;margin-top:4px';
+  enc.appendChild(dotDOM('#29d65b',6));
+  const et=document.createElement('span'); et.style.cssText='font-size:10px;color:#29d65b'; et.textContent='ENCRYPTED'; enc.appendChild(et);
+  body.appendChild(enc);
+  const divr=mkDiv(); divr.style.cssText='height:1px;background:#1a1c1e;margin:8px 0'; body.appendChild(divr);
+  [['DEVICE','Claude-A1B2'],['OWNER','Michael']].forEach(([l,v])=>{
+    const lb=mkDiv(); lb.style.cssText='font-size:8px;color:#7a8492;letter-spacing:.5px;margin-top:6px'; lb.textContent=l; body.appendChild(lb);
+    const vb=mkDiv(); vb.style.cssText='font-size:13px;font-weight:700;margin-top:2px'; vb.textContent=v; body.appendChild(vb);
+  });
+  root.appendChild(body);
+  return root;
+}
+
+// Screen 7: PASSKEY
+function buildScreenPasskey() {
+  const root=mkDiv('scr');
+  const hdr=mkDiv('scr-pk-hdr'); hdr.textContent='BLUETOOTH PAIRING'; root.appendChild(hdr);
+  const body=mkDiv('scr-pk-body');
+  const l=mkDiv('scr-lbl'); l.textContent='ENTER ON DESKTOP'; body.appendChild(l);
+  const box=mkDiv('scr-pk-box'); box.textContent='482917'; body.appendChild(box);
+  const dl=mkDiv('scr-lbl'); dl.style.marginTop='12px'; dl.textContent='DEVICE NAME'; body.appendChild(dl);
+  const dn=mkDiv(); dn.style.cssText='font-size:12px;font-weight:700;margin-top:2px'; dn.textContent='Claude-A1B2'; body.appendChild(dn);
+  root.appendChild(body);
+  return root;
+}
+
+// Screen 8: INFO
+function buildScreenInfo() {
+  const root=mkDiv('scr');
+  const pk=mkDiv('scr-info-pk'); pk.style.height='54px';
+  pk.appendChild(makeGr0m({mood:'idle',w:135,h:54,vb:'28 22 78 50',shadow:false,sj:false,sg:true}));
+  root.appendChild(pk);
+  const bar=mkDiv('scr-info-b');
+  const bt=mkDiv(); bt.style.cssText='font-size:12px;font-weight:700;letter-spacing:1px'; bt.textContent='ABOUT'; bar.appendChild(bt);
+  const bp=mkDiv(); bp.style.cssText='font-size:9px;color:#7a8492'; bp.textContent='1/6'; bar.appendChild(bp);
+  root.appendChild(bar);
+  const body=mkDiv('scr-body');
+  const t1=mkDiv(); t1.style.cssText='font-size:13px;color:#fff;line-height:1.15'; t1.textContent='I watch your Claude sessions.'; body.appendChild(t1);
+  const divr=mkDiv(); divr.style.cssText='height:1px;background:#1a1c1e;margin:7px 0'; body.appendChild(divr);
+  const t2=mkDiv(); t2.style.cssText='font-size:11px;color:#7a8492;line-height:1.2'; t2.textContent='Sleep when idle.'; body.appendChild(t2);
+  root.appendChild(body);
+  return root;
+}
+
+// ── Inject window mirror device ───────────────────────────────
+const mirrorEl = document.getElementById('mirror-m5');
+mirrorEl.appendChild(makeM5(1.0, buildScreenApproval(), true));
+
+// ── Inject screens grid ───────────────────────────────────────
+const screensData = [
+  {label:'Home · Idle',        bg:'',         build:buildScreenHomeIdle,    led:false},
+  {label:'Home · Working',     bg:'',         build:buildScreenHomeWorking, led:false},
+  {label:'Approval Prompt',    bg:'alert-bg', build:buildScreenApproval,    led:true},
+  {label:'Pet · Stats',        bg:'',         build:buildScreenPet,         led:false},
+  {label:'Menu',               bg:'',         build:buildScreenMenu,        led:false},
+  {label:'Bluetooth · Status', bg:'',         build:buildScreenBluetooth,   led:false},
+  {label:'Pairing Passkey',    bg:'blue-bg',  build:buildScreenPasskey,     led:false},
+  {label:'Info · About',       bg:'',         build:buildScreenInfo,        led:false},
+];
+
+const screensGrid = document.getElementById('screens-grid');
+screensData.forEach(s => {
+  const ab = document.createElement('div');
+  ab.setAttribute('role','listitem');
+  ab.className='scr-ab';
+
+  const stage = document.createElement('div');
+  stage.className = 'dev-stage' + (s.bg ? ' '+s.bg : '');
+  stage.setAttribute('aria-label', s.label + ' screen');
+  stage.appendChild(makeM5(1.55, s.build(), s.led));
+  ab.appendChild(stage);
+
+  const lbl = document.createElement('p');
+  lbl.className = 'scr-ab-lbl';
+  lbl.textContent = s.label;
+  ab.appendChild(lbl);
+
+  screensGrid.appendChild(ab);
+});
+
+// ── Inject gr0m states ────────────────────────────────────────
+const gr0mData = [
+  {label:'01 · IDLE', sub:'Sunglasses on, joint lit, hearts→leaves. Cyan visor with pupil parallax.',
+   bg:'linear-gradient(180deg,#1a1f2c 0%,#0a0e16 100%)',
+   opts:{mood:'idle',particles:3,pupil:-2}},
+  {label:'02 · BUSY · NEW', sub:'Headphones on, pixel laptop in his hands with code on screen. Green visor.',
+   bg:'linear-gradient(180deg,#0e1f1a 0%,#060e0c 100%)',
+   opts:{mood:'busy',sg:false,sj:false,headphones:true,hands:'type',laptop:true,ledOn:true}},
+  {label:'03 · ATTENTION · NEW', sub:'Red visor, alert mouth, antenna blinking. Speech bubble. Hands wide.',
+   bg:'linear-gradient(180deg,#2a1010 0%,#0c0404 100%)',
+   opts:{mood:'attention',ledOn:true,hands:'wide',bubble:{text:'BASH?!',color:'#ff2a1a',x:86,y:12}}},
+  {label:'04 · CELEBRATE · NEW', sub:'Party hat, confetti rain, hands wide. Bolt cycles rainbow on-device.',
+   bg:'linear-gradient(180deg,#1c0e2a 0%,#08030f 100%)',
+   opts:{mood:'celebrate',sg:false,sj:false,partyHat:true,confetti:true,hands:'wide',ledOn:true}},
+  {label:'05 · HEART', sub:'Magenta visor, blush mouth, floating hearts. Triggers on fast approve.',
+   bg:'linear-gradient(180deg,#2a1424 0%,#0c0510 100%)',
+   opts:{mood:'heart',hearts:true,ledOn:true,sj:false}},
+  {label:'06 · SLEEP · NEW', sub:"Nightcap, Z's drifting. Slate visor, closed mouth. Bridge offline.",
+   bg:'linear-gradient(180deg,#14182a 0%,#06080f 100%)',
+   opts:{mood:'sleep',sg:false,sj:false,nightcap:true,zzz:true}},
+  {label:'07 · CHEST LCD · NEW', sub:'Bolt swaps to tiny green LCD showing tokens, sessions, or pet level.',
+   bg:'linear-gradient(180deg,#0e1820 0%,#04080c 100%)',
+   opts:{mood:'idle',lcdText:'184K',pupil:1}},
+  {label:'08 · AT HIS DESK · NEW', sub:'Pixel desk with coffee mug + steam. Pairs with landscape clock screen.',
+   bg:'linear-gradient(180deg,#1c1812 0%,#0a0806 100%)',
+   opts:{mood:'idle',desk:true,particles:2}},
+  {label:'09 · DIZZY', sub:'X mouth, antenna crimson, joint out. Triggers on shake.',
+   bg:'linear-gradient(180deg,#1a1810 0%,#0a0904 100%)',
+   opts:{mood:'dizzy',sg:false,ledOn:true,particles:2}},
+];
+
+const gr0mGrid = document.getElementById('gr0m-grid');
+gr0mData.forEach(s => {
+  const ab = document.createElement('div');
+  ab.className = 'gr0m-ab';
+  ab.style.background = s.bg;
+  ab.setAttribute('aria-label', 'gr0m state: ' + s.label);
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'transform:scale(2.6);transform-origin:center';
+  wrap.setAttribute('aria-hidden','true');
+  wrap.appendChild(makeGr0m(Object.assign({w:135,h:160},s.opts)));
+  ab.appendChild(wrap);
+
+  const cap = document.createElement('div');
+  cap.className = 'gr0m-cap';
+  const cl = document.createElement('div');
+  cl.className = 'gr0m-cl';
+  cl.textContent = s.label;
+  const cs = document.createElement('div');
+  cs.className = 'gr0m-cs';
+  cs.textContent = s.sub;
+  cap.appendChild(cl);
+  cap.appendChild(cs);
+  ab.appendChild(cap);
+
+  gr0mGrid.appendChild(ab);
+});
+</script>
+</body>
+</html>
