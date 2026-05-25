@@ -38,6 +38,24 @@ const int LED_PIN = 10;          // red LED, active-low
 const uint16_t HOT   = 0xFA20;   // red-orange: warnings, impatience, deny
 const uint16_t PANEL = 0x2104;   // overlay panel background
 
+// ── Type scale (one scale, applied uniformly across every draw* function) ──
+// Adafruit-GFX text sizes map to roles. The rule: a given semantic ROLE uses
+// the SAME size + color on every screen, so the eye learns the hierarchy once.
+//   FS_HERO   = 3  — big numbers / huge tool name (the one thing per screen
+//                    you read first: token hero, passkey digits, tool name).
+//   FS_HEADER = 2  — screen/panel header labels (MENU, USAGE, BLUETOOTH…),
+//                    and the per-screen lead/status WORD (e.g. "LINKED").
+//   FS_BODY   = 2  — the legibility floor: list rows, values, status text.
+//                    Never drop a value/row below this.
+//   FS_SUB    = 1  — true captions ONLY: page counters ("3/7"), footer
+//                    key-hints, the dim label beside a value. For wide data
+//                    rows (kv pairs that don't fit at size 2) prefer the
+//                    built-in Font 2 (8×16) over size 1 — see lg() in drawInfo.
+const uint8_t FS_HERO   = 3;
+const uint8_t FS_HEADER = 2;
+const uint8_t FS_BODY   = 2;
+const uint8_t FS_SUB    = 1;
+
 // ── Design-system palette (screens.jsx) ──────────────────────────────────
 // RGB565 of the canvas hex tokens. Names mirror the design so a screen body
 // reads close to the JSX. These are FIXED accent colors (independent of the
@@ -236,7 +254,11 @@ uint8_t settingsSel  = 0;
 // Radio + adapter controls moved to the Connection submenu (drawConn). DJ is no
 // longer a manual setting — it's an automatic end-game flourish (see djActive in
 // loop(), unlocked at Stage 5), so there's no "dj" row here.
-const char* settingsItems[] = { "brightness", "sound", "led", "mic claps", "transcript", "clock rot", "ascii pet", "reset", "back" };
+// Labels kept short so each row fits at BODY size (size 2) alongside the
+// right-aligned value column in the shared list look (drawListMenu). Indices
+// must stay aligned with applySetting()/settingsMeta(): 0 bright, 1 sound,
+// 2 led, 3 mic, 4 transcript(hud), 5 clock rot, 6 ascii pet, 7 reset, 8 back.
+const char* settingsItems[] = { "bright", "sound", "led", "mic", "hud", "clock", "pet", "reset", "back" };
 const uint8_t SETTINGS_N = 9;
 extern bool adapterMode;   // defined near loop(); the Connection menu toggles it
 
@@ -479,15 +501,15 @@ static void drawListMenu(const char* title, const char* const* items, int n,
                          ListMetaFn metaFn) {
   spr.fillSprite(DS_BLACK);
   const int HEADER_H = 20, FOOTER_H = 14;
-  // Header strip
+  // Header strip — title at HEADER size, the n/total counter at SUB.
   spr.fillRect(0, 0, W, HEADER_H, DS_HEADER);
   spr.drawFastHLine(0, HEADER_H, W, DS_HDRBORD);
-  spr.setTextSize(2);
+  spr.setTextSize(FS_HEADER);
   spr.setTextColor(DS_WHITE, DS_HEADER);
   spr.setCursor(6, 3);
   spr.print(title);
   char cb[12]; snprintf(cb, sizeof(cb), "%d/%d", sel + 1, n);
-  spr.setTextSize(1);
+  spr.setTextSize(FS_SUB);
   spr.setTextColor(DS_DIM, DS_HEADER);
   spr.setCursor(W - 6 - (int)strlen(cb) * 6, 7);
   spr.print(cb);
@@ -504,24 +526,24 @@ static void drawListMenu(const char* title, const char* const* items, int n,
     uint16_t rowBg    = sel_ ? (danger ? DS_CFMHDR : DS_ORANGE) : DS_BLACK;
     uint16_t labelCol = sel_ ? DS_BLACK : (danger ? DS_REDSOFT : DS_WHITE);
     if (sel_) spr.fillRect(0, ry, W, ROW_H, rowBg);
-    spr.setTextSize(2);
+    spr.setTextSize(FS_BODY);   // rows are BODY (the legibility floor)
     if (sel_) { spr.setTextColor(DS_BLACK, rowBg); spr.setCursor(4, ry + (ROW_H - 16) / 2); spr.print(">"); }
     spr.setTextColor(labelCol, sel_ ? rowBg : DS_BLACK);
     spr.setCursor(18, ry + (ROW_H - 16) / 2);
     spr.print(items[i]);
     if (meta[0]) {
-      spr.setTextSize(1);
+      spr.setTextSize(FS_SUB);   // value column = SUB caption
       spr.setTextColor(sel_ ? DS_BLACK : mcol, sel_ ? rowBg : DS_BLACK);
       spr.setCursor(W - 6 - (int)strlen(meta) * 6, ry + (ROW_H - 8) / 2);
       spr.print(meta);
     }
   }
 
-  // Footer hint strip
+  // Footer hint strip — key-hints are SUB captions.
   int fy = H - FOOTER_H;
   spr.fillRect(0, fy, W, FOOTER_H, DS_DARK);
   spr.drawFastHLine(0, fy, W, DS_LINE);
-  spr.setTextSize(1);
+  spr.setTextSize(FS_SUB);
   spr.setTextColor(DS_DIM, DS_DARK);
   spr.setCursor(6, fy + 4);
   spr.print(footL);
@@ -529,64 +551,34 @@ static void drawListMenu(const char* title, const char* const* items, int n,
   spr.print(footR);
 }
 
-static void drawSettings() {
-  const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 14;
-  const int mh = HEADER_H + SETTINGS_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  // Card chrome
-  spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
-  spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
-
-  // Header pill
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
-  spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(mx + 6, my + 6);
-  spr.print("SETTINGS");
-
+// Settings submenu meta — value column per row, using the shared list look
+// (DS palette, size-1 caption meta). On/off rows go green/dim; brightness,
+// clock-rot and ascii-pet show their cycler value. Reset (idx 7) carries the
+// destructive "!" marker; back (idx 8) has no meta.
+static void settingsMeta(int i, char* out, size_t osz, uint16_t* col, bool* danger) {
   Settings& s = settings();
-  // On/off rows in the new layout: 1=sound 2=led 3=mic 4=transcript.
-  // 5=clock rot (enum), 6=ascii pet (count); 0=brightness; 7/8 = reset/back
-  // (no value column).
-  int rowsTop = my + HEADER_H + 2;
-  for (int i = 0; i < SETTINGS_N; i++) {
-    bool sel = (i == settingsSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) {
-      spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);   // orange left bar
-    }
-    spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 8, ry + 3);
-    spr.print(settingsItems[i]);
-    spr.setCursor(mx + mw - 38, ry + 3);
-    if (i == 0) {
-      spr.setTextColor(p.body, PANEL);
-      spr.printf("%u/4", brightLevel);
-    } else if (i >= 1 && i <= 4) {
-      bool on = (i == 1) ? s.sound : (i == 2) ? s.led : (i == 3) ? s.mic : s.hud;
-      spr.setTextColor(on ? GREEN : p.textDim, PANEL);
-      spr.print(on ? " on" : "off");
-    } else if (i == 5) {
-      static const char* const RN[] = { "auto", "port", "land" };
-      spr.setTextColor(p.body, PANEL);
-      spr.print(RN[s.clockRot]);
-    } else if (i == 6) {
-      uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
-      uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
-      spr.setTextColor(p.body, PANEL);
-      spr.printf("%u/%u", pos, total);
-    }
+  if (i == 0) {
+    snprintf(out, osz, "%u/4", brightLevel); *col = DS_ORANGE;
+  } else if (i >= 1 && i <= 4) {
+    bool on = (i == 1) ? s.sound : (i == 2) ? s.led : (i == 3) ? s.mic : s.hud;
+    snprintf(out, osz, "%s", on ? "on" : "off");
+    *col = on ? DS_GREEN : DS_DIM;
+  } else if (i == 5) {
+    static const char* const RN[] = { "auto", "port", "land" };
+    snprintf(out, osz, "%s", RN[s.clockRot]); *col = DS_ORANGE;
+  } else if (i == 6) {
+    uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
+    uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
+    snprintf(out, osz, "%u/%u", pos, total); *col = DS_ORANGE;
+  } else if (i == 7) {
+    snprintf(out, osz, "!"); *col = DS_REDSOFT; *danger = true;
   }
-
-  // Footer hint
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Change");
+}
+// Settings — now the shared full-screen list look (ScreenMenu family) so it
+// matches MENU / RADIO / USAGE / RESET. BtnA scrolls, BtnB changes the row.
+static void drawSettings() {
+  drawListMenu("SETTINGS", settingsItems, SETTINGS_N, settingsSel,
+               "A scroll", "B change", settingsMeta);
 }
 
 // Reset submenu meta — "delete char" / "factory reset" are both destructive.
@@ -656,12 +648,33 @@ static void drawReset() {
   drawListMenu("RESET", resetItems, RESET_N, resetSel, "A scroll", "B confirm", resetMeta);
 }
 
-// Connection submenu — ScreenConnMenu ("RADIO"). The currently-active radio
-// row (WiFi / BT / Off) carries a green "✓" meta; "WiFi ⊕ BT" + "reboots" hint.
+// Connection submenu — ScreenConnMenu ("RADIO"). The meta column reads LIVE
+// radio state each frame (drawListMenu re-runs every loop while connOpen), so
+// the WiFi/BT rows reflect what the radio is actually doing right now — not
+// just the persisted setting. WiFi shows STA/AP state; BT shows link or the
+// "suspend" the WiFi/BLE mutex parks it in; Off is green only when both radios
+// are genuinely down.
 static void connMeta(int i, char* out, size_t osz, uint16_t* col, bool* danger) {
   Settings& s = settings();
-  bool active = (i == 0 && s.wifi) || (i == 1 && s.bt) || (i == 2 && !s.wifi && !s.bt);
-  if (active) { snprintf(out, osz, "ON"); *col = DS_GREEN; }
+  if (i == 0) {                    // WiFi — live STA/AP state
+    if (!s.wifi) return;
+    NetWifiState ws = netWifiState();
+    switch (ws) {
+      case NW_ONLINE:     snprintf(out, osz, "online"); *col = DS_GREEN;  break;
+      case NW_PORTAL:     snprintf(out, osz, "AP %d", netWifiApClients()); *col = DS_AMBER; break;
+      case NW_CONNECTING:
+      case NW_STARTING:   snprintf(out, osz, "...");    *col = DS_AMBER;  break;
+      case NW_FAILED:     snprintf(out, osz, "failed"); *col = DS_RED;    break;
+      default:            snprintf(out, osz, "on");     *col = DS_DIM;    break;
+    }
+  } else if (i == 1) {             // BT — live link / suspended-by-WiFi
+    if (!s.bt) return;
+    if (bleSuspended())      { snprintf(out, osz, "suspend"); *col = DS_DIM; }
+    else if (bleConnected()) { snprintf(out, osz, "linked");  *col = DS_GREEN; }
+    else                     { snprintf(out, osz, "on");      *col = DS_AMBER; }
+  } else if (i == 2) {             // Off — green when both radios are really off
+    if (!s.wifi && !s.bt) { snprintf(out, osz, "ON"); *col = DS_GREEN; }
+  }
 }
 static void drawConn() {
   drawListMenu("RADIO", connItems, CONN_N, connSel, "WiFi+BT", "reboots", connMeta);
@@ -1017,24 +1030,25 @@ bool checkShake() {
 
 
 // Design-style info header strip (ScreenInfo): a full-width dark band with the
-// section title in size-2 white and a dim "page+1/total" counter, hairline
-// dividers top and bottom. Sits below the small gr0m head peek (rows 0..TOP).
+// section title at HEADER size and a dim "page+1/total" counter at SUB (the
+// "3/7" caption stays size 1 by design), hairline dividers top and bottom.
+// Sits below the small gr0m head peek (rows 0..TOP).
 static void _infoHeader(const Palette& p, int& y, const char* section, uint8_t page) {
   const int HEADER_H = 18;
   spr.fillRect(0, y, W, HEADER_H, DS_DARK);
   spr.drawFastHLine(0, y, W, DS_LINE);
   spr.drawFastHLine(0, y + HEADER_H, W, DS_LINE);
-  spr.setTextSize(2);
+  spr.setTextSize(FS_HEADER);
   spr.setTextColor(DS_WHITE, DS_DARK);
   spr.setCursor(6, y + 2);
   spr.print(section);
   char pb[8]; snprintf(pb, sizeof(pb), "%u/%u", page + 1, INFO_PAGES);
-  spr.setTextSize(1);
+  spr.setTextSize(FS_SUB);
   spr.setTextColor(DS_DIM, DS_DARK);
   spr.setCursor(W - 6 - (int)strlen(pb) * 6, y + 5);
   spr.print(pb);
   y += HEADER_H + 6;
-  spr.setTextSize(1);
+  spr.setTextSize(FS_SUB);
 }
 
 // ScreenPasskey — BLUETOOTH PAIRING. Blue header banner, dim "ENTER ON DESKTOP"
@@ -1138,21 +1152,29 @@ void drawInfo() {
 
   } else if (infoPage == 2) {
     _infoHeader(p, y, "CLAUDE", infoPage);
+    // Wide kv rows use Font 2 (8×16) — the body floor for data rows — instead
+    // of the old size-1 (10px) sub-text that read too small at arm's length.
+    // Read live every frame so the LINK block reflects the radio state now.
     spr.setTextColor(p.textDim, p.bg);
     // The bridge is a prompt gateway, not session-aware, so it can't report
     // live Claude session counts (they were always 0). Show what it DOES track
     // accurately and pushes every heartbeat: approvals/denials this period.
-    ln("  approved  %u", stats().okCount);
-    ln("  denied    %u", stats().noCount);
-    y += 8;
-    spr.setTextColor(p.text, p.bg);
-    ln("LINK");
+    lg("approved %u", stats().okCount);
+    lg("denied   %u", stats().noCount);
+    y += 4;
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setTextSize(FS_SUB);
+    spr.setCursor(4, y); spr.print("LINK"); y += 10;
     spr.setTextColor(p.textDim, p.bg);
-    ln("  via       %s", dataScenarioName());
-    ln("  ble       %s", !bleConnected() ? "-" : bleSecure() ? "encrypted" : "OPEN");
+    // Live radio read at draw time: BT (connected / suspended-by-WiFi / off)
+    // and the active transport name.
+    const char* bleLbl = bleSuspended() ? "wifi owns" : !bleConnected() ? "-"
+                       : bleSecure() ? "encrypted" : "OPEN";
+    lg("via  %s", dataScenarioName());
+    lg("ble  %s", bleLbl);
     uint32_t age = (millis() - tama.lastUpdated) / 1000;
-    ln("  last msg  %lus", (unsigned long)age);
-    ln("  state     %s", stateNames[activeState]);
+    lg("last %lus", (unsigned long)age);
+    lg("st   %s", stateNames[activeState]);
 
   } else if (infoPage == 3) {
     _infoHeader(p, y, "DEVICE", infoPage);
@@ -1190,78 +1212,98 @@ void drawInfo() {
     ln("  uptime   %luh %02lum", up / 3600, (up / 60) % 60);
     ln("  heap     %uKB", ESP.getFreeHeap() / 1024);
     ln("  bright   %u/4", brightLevel);
-    ln("  bt       %s", settings().bt ? (dataBtActive() ? "linked" : "on") : "off");
+    ln("  bt       %s", bleSuspended() ? "wifi owns"
+                       : settings().bt ? (dataBtActive() ? "linked" : "on") : "off");
     ln("  temp     %dC", (int)M5.Axp.GetTempInAXP192());
 
   } else if (infoPage == 4) {
-    // ScreenBluetooth — the connection status page. Hero BT link state
-    // (LINKED / ON / OFF), an ENCRYPTED status dot, then DEVICE + OWNER rows.
-    // WiFi/VPN remain as compact secondary rows since this is the only
-    // transport page; the design's BT block is the hero.
-    _infoHeader(p, y, "BLUETOOTH", infoPage);
+    // ScreenLinks — the live connection status page. Hero BT link state
+    // (LINKED / READY / SUSPEND / OFF) as the one big word, an ENCRYPTED status
+    // dot, the device name at BODY size (NOT a hero — it's too long to read big
+    // and it isn't the headline), then live WiFi (STA IP / AP clients) + VPN.
+    // EVERYTHING here is read at DRAW TIME each frame: drawInfo() re-runs every
+    // loop while DISP_INFO is active, so toggling a radio or (dis)connecting a
+    // peer is reflected immediately without any cached snapshot.
+    _infoHeader(p, y, "LINKS", infoPage);
 
+    bool suspended = bleSuspended();          // BLE suspended → WiFi owns radio
     bool connected = bleConnected();
-    bool linked    = settings().bt && (connected || dataBtActive());
+    bool linked    = settings().bt && !suspended && (connected || dataBtActive());
     bool secure    = connected && bleSecure();
-    // Hero link state — size 3, green when linked.
-    spr.setTextSize(2);
-    const char* big = linked ? "LINKED" : (settings().bt ? "READY" : "OFF");
-    uint16_t bigCol = linked ? DS_GREEN : (settings().bt ? DS_AMBER : DS_DIM);
+    // Hero link WORD — FS_HERO (size 3). Green linked / amber ready / dim off,
+    // and a distinct "SUSPEND" when the WiFi/BLE radio mutex has parked BLE.
+    const char* big = suspended ? "SUSPEND"
+                    : linked     ? "LINKED"
+                    : settings().bt ? "READY" : "OFF";
+    uint16_t bigCol = suspended ? DS_DIM
+                    : linked    ? DS_GREEN
+                    : settings().bt ? DS_AMBER : DS_DIM;
+    spr.setTextSize(FS_HERO);
     spr.setTextColor(bigCol, p.bg);
     spr.setCursor(4, y);
     spr.print(big);
-    y += 22;
-    // ENCRYPTED status dot + label.
+    y += 28;
+    // ENCRYPTED status dot + label (sub caption beside the hero state).
     if (linked) {
       uint16_t encCol = secure ? DS_GREEN : DS_AMBER;
       drawStatusDot(8, y + 4, encCol, 3, true);
-      spr.setTextSize(1);
+      spr.setTextSize(FS_SUB);
       spr.setTextColor(encCol, p.bg);
       spr.setCursor(16, y + 1);
       spr.print(secure ? "ENCRYPTED" : "OPEN LINK");
       y += 14;
+    } else if (suspended) {
+      spr.setTextSize(FS_SUB);
+      spr.setTextColor(DS_DIM, p.bg);
+      spr.setCursor(4, y + 1);
+      spr.print("WiFi owns radio");
+      y += 14;
     }
     spr.drawFastHLine(4, y, W - 8, DS_LINE);
     y += 6;
-    // DEVICE
-    spr.setTextSize(1);
+    // DEVICE — caption (size 1) then the name at BODY (size 2). The name is
+    // deliberately NOT a hero: "Claude-XXXX" is 11 chars and reads as data.
+    spr.setTextSize(FS_SUB);
     spr.setTextColor(DS_DIM, p.bg);
     spr.setCursor(4, y); spr.print("DEVICE");
     y += 10;
-    spr.setTextSize(2);
+    spr.setTextSize(FS_BODY);
     spr.setTextColor(DS_WHITE, p.bg);
     spr.setCursor(4, y); spr.print(btName);
     y += 20;
-    // OWNER
-    spr.setTextSize(1);
-    spr.setTextColor(DS_DIM, p.bg);
-    spr.setCursor(4, y); spr.print("OWNER");
-    y += 10;
-    spr.setTextSize(2);
-    spr.setTextColor(DS_WHITE, p.bg);
-    spr.setCursor(4, y); spr.print(ownerName()[0] ? ownerName() : "-");
-    y += 20;
-    // Compact WiFi/VPN secondary rows (size 1).
+    // WiFi — live STA state read each frame. ONLINE shows the current IP; the
+    // setup-AP state shows the live count of associated stations.
     NetWifiState ws = netWifiState();
     if (ws != NW_OFF) {
       uint16_t wc = (ws == NW_ONLINE) ? DS_GREEN : (ws == NW_FAILED) ? DS_RED : DS_AMBER;
       const char* wl = (ws == NW_ONLINE) ? "online" : (ws == NW_PORTAL) ? "setup AP"
                      : (ws == NW_FAILED) ? "failed" : "connecting";
-      spr.setTextSize(1);
-      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("wifi");
+      spr.setTextSize(FS_SUB);
+      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("WIFI");
       spr.setTextColor(wc, p.bg); spr.setCursor(40, y); spr.print(wl);
       y += 10;
+      if (ws == NW_ONLINE) {
+        spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y);
+        spr.print(netWifiIP());
+        y += 10;
+      } else if (ws == NW_PORTAL) {
+        spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y);
+        spr.printf("clients: %d", netWifiApClients());
+        y += 10;
+      }
     }
     if (netWgState() != WG_OFF) {
       NetWgState gs = netWgState();
       uint16_t gc = gs == WG_UP ? DS_GREEN : gs == WG_FAILED ? DS_RED : DS_AMBER;
-      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("vpn");
+      spr.setTextSize(FS_SUB);
+      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("VPN");
       spr.setTextColor(gc, p.bg); spr.setCursor(40, y);
       spr.print(gs == WG_UP ? "up" : gs == WG_FAILED ? "failed" : "...");
       y += 10;
     }
     // Hint: BtnA long-press opens the Connection submenu (gated in loop()).
     spr.setTextColor(DS_DIM, p.bg);
+    spr.setTextSize(FS_SUB);
     spr.setCursor(4, H - 10); spr.print("hold A: edit");
 
   } else if (infoPage == INFO_PG_USAGE) {
@@ -2011,6 +2053,20 @@ static void drawHomeTranscript(const Palette& p, int topY) {
   }
 }
 
+// Orange DEMO badge — a small pill in the header's left third, drawn over the
+// home screen whenever the fake-data demo mode is active (menu "demo" row).
+// Sits just under the header strip so it never collides with the state cluster.
+static void drawDemoBadge() {
+  const char* lbl = "DEMO";
+  const int bw = (int)strlen(lbl) * 6 + 8;   // size-1 caption + padding
+  const int bx = 6, by = H_STRIP + 3, bh = 13;
+  spr.fillRoundRect(bx, by, bw, bh, 2, DS_ORANGE);
+  spr.setTextSize(FS_SUB);
+  spr.setTextColor(DS_BLACK, DS_ORANGE);
+  spr.setCursor(bx + 4, by + 3);
+  spr.print(lbl);
+}
+
 void drawHUD() {
   if (tama.promptId[0]) { drawApproval(); return; }
   const Palette& p = characterPalette();
@@ -2018,6 +2074,9 @@ void drawHUD() {
   // ── HEADER STRIP ── busy when sessions are running or the persona is BUSY.
   bool busy = (tama.sessionsRunning > 0) || (activeState == P_BUSY);
   drawHeaderStrip(busy ? "BUSY" : "IDLE", busy ? DS_GREEN : DS_CYAN, batteryPct());
+  // Demo-mode view = the redesigned Home plus an orange DEMO badge under the
+  // header. Drawn here so it shows on both the IDLE and BUSY layouts.
+  if (dataDemo()) drawDemoBadge();
 
   if (!busy) {
     // ScreenHomeIdle — "TOKENS TODAY" + hero number (period tokens mirror).
@@ -2078,7 +2137,12 @@ void drawHUD() {
     }
   }
 
-  drawHomeTranscript(p, STRIP_Y + STRIP_H);
+  // The transcript rows are the only hud-gated part of Home: when the
+  // transcript toggle is off, the RUN/WAIT/TOK session strip above still
+  // renders (Home is never bare), but the per-line transcript is suppressed.
+  if (settings().hud) {
+    drawHomeTranscript(p, STRIP_Y + STRIP_H);
+  }
 }
 
 void setup() {
@@ -2700,7 +2764,10 @@ void loop() {
     else if (clocking) drawClock();
     else if (displayMode == DISP_INFO) drawInfo();
     else if (displayMode == DISP_PET) drawPet();
-    else if (settings().hud) drawHUD();
+    // Home always renders — it is never a bare character. drawHUD() draws the
+    // design header strip + a stats footer regardless of the transcript
+    // (settings().hud) toggle; hud only gates the BUSY transcript rows.
+    else drawHUD();
     if (resetOpen) drawReset();
     else if (settingsOpen) drawSettings();
     else if (connOpen) drawConn();
