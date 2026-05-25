@@ -880,77 +880,98 @@ static void drawHeadphones() {
   int fx = faceOffX();
   int fy = faceOffY();
   int cx = HX + fx;
-  // Band sweeps from upper-left to upper-right of the head
-  int topY = HY - HH/2 + fy - 6;
-  for (int i = -22; i <= 22; i++) {
-    // parabolic arc — y = topY - (1 - (i/22)^2) * 4
-    float n = (float)i / 22.0f;
-    int yOff = (int)((1.0f - n * n) * 4.0f);
-    _t->drawPixel(cx + i, topY - yOff, STEEL);
-    _t->drawPixel(cx + i, topY - yOff + 1, STEEL);
+  // Canvas: band arc `M 44 38 Q 67 24 90 38` — endpoints hug the forehead
+  // (head top is y=32) and the arch crests ~7 px above them at center. The
+  // SVG x/y units map 1:1 to device pixels (same HX/HY anchor), so the band
+  // sweeps cx±23 between y=38 (ends) and y≈31 (apex). 2-px steel stroke with
+  // a lighter inner highlight, matching the two stacked <path> strokes.
+  int endY = HY - HH/2 + fy + 6;     // y=38 — just below the head-top edge
+  for (int i = -23; i <= 23; i++) {
+    float n = (float)i / 23.0f;
+    int yOff = (int)((1.0f - n * n) * 7.0f);   // crest 7 px over the ends
+    int y = endY - yOff;
+    _t->drawPixel(cx + i, y,     STEEL);
+    _t->drawPixel(cx + i, y + 1, STEEL);
+    _t->drawPixel(cx + i, y,     0x52AA);       // inner highlight stroke
   }
-  // Ear cups — fixed (don't rotate with face) so they read like real cans
-  int eY = HY - 4 + fy;
-  _t->fillRect(cx - 28, eY,     6, 12, STEEL);
-  _t->fillRect(cx + 22, eY,     6, 12, STEEL);
-  // Red foam ring stripe (visible because slightly inset)
-  _t->fillRect(cx - 23, eY + 4, 1, 4, CRIMSON);
-  _t->fillRect(cx + 22, eY + 4, 1, 4, CRIMSON);
-  // Subtle highlight on the cups
-  _t->drawPixel(cx - 28, eY,     SPECULAR);
-  _t->drawPixel(cx + 27, eY,     SPECULAR);
+  // Ear cups — sit over the head sides at y=44 (canvas x=38 / x=90, 6×10).
+  // Fixed (don't rotate with face) so they read like real over-ears.
+  int eY = HY - HH/2 + fy + 12;      // y=44
+  _t->fillRect(cx - 29, eY,     6, 10, STEEL);   // left cup  (x=38)
+  _t->fillRect(cx + 23, eY,     6, 10, STEEL);   // right cup (x=90)
+  // Cup shadow seam on the left can (canvas Px 38,45,1,8)
+  _t->fillRect(cx - 29, eY + 1, 1, 8, 0x52AA);
+  // Red foam ring stripe (canvas: x=43 left / x=90 right, y=47, 1×4)
+  _t->fillRect(cx - 24, eY + 3, 1, 4, CRIMSON);
+  _t->fillRect(cx + 23, eY + 3, 1, 4, CRIMSON);
+  // Subtle highlight specks on the outer cup corners
+  _t->drawPixel(cx - 29, eY,     SPECULAR);
+  _t->drawPixel(cx + 28, eY,     SPECULAR);
 }
 
 // Small hands at the chest area — used when typing.
 // Two stubby grey circles either side of the laptop, with thin arms back
 // to the chest body.
 static void drawHandsAtLaptop() {
+  // Canvas Hands(pose='type'): two stubby hands resting on the keyboard at
+  // y≈111 (just above the kb top y=114), flanking it at x≈52 / x≈81 — i.e.
+  // cx±15. Short chassis-shadow arm stubs reach back up toward the chest,
+  // each capped by a chassis-color knuckle circle (r=3) with a 1-px highlight.
   int cx = pkX(HX);
-  int hy = pkY(HY + 38);
-  int ay = pkY(HY + 30);
+  int hy = pkY(111);                 // hand-circle center (canvas y+1 = 111)
+  int ay = pkY(105);                 // arm stub top — bridges up to the body
   int hr = pkS(3); if (hr < 1) hr = 1;
-  // Arms (thin chassis-color stubs)
-  _t->drawLine(cx - pkS(20), ay, cx - pkS(14), hy - pkS(2), CHASSIS_SH);
-  _t->drawLine(cx - pkS(19), ay, cx - pkS(13), hy - pkS(2), CHASSIS_SH);
-  _t->drawLine(cx + pkS(20), ay, cx + pkS(14), hy - pkS(2), CHASSIS_SH);
-  _t->drawLine(cx + pkS(19), ay, cx + pkS(13), hy - pkS(2), CHASSIS_SH);
-  // Hands (circles)
-  _t->fillCircle(cx - pkS(14), hy, hr, CHASSIS);
-  _t->drawCircle(cx - pkS(14), hy, hr, CHASSIS_SH);
-  _t->drawPixel(cx - pkS(15), hy - 1, CHASSIS_HI);
-  _t->fillCircle(cx + pkS(14), hy, hr, CHASSIS);
-  _t->drawCircle(cx + pkS(14), hy, hr, CHASSIS_SH);
-  _t->drawPixel(cx + pkS(13), hy - 1, CHASSIS_HI);
+  // Arms — diagonal chassis-shadow stubs from the chest down onto the keys.
+  // (The canvas draws short horizontal 6×4 stubs; the firmware angles them so
+  //  they read as forearms tucking under the head, matching the 3D body.)
+  _t->drawLine(cx - pkS(19), ay, cx - pkS(15), hy - pkS(2), CHASSIS_SH);
+  _t->drawLine(cx - pkS(18), ay, cx - pkS(14), hy - pkS(2), CHASSIS_SH);
+  _t->drawLine(cx + pkS(19), ay, cx + pkS(15), hy - pkS(2), CHASSIS_SH);
+  _t->drawLine(cx + pkS(18), ay, cx + pkS(14), hy - pkS(2), CHASSIS_SH);
+  // Knuckles (canvas circles at x=52 / x=81 → cx∓15)
+  _t->fillCircle(cx - pkS(15), hy, hr, CHASSIS);
+  _t->drawCircle(cx - pkS(15), hy, hr, CHASSIS_SH);
+  _t->drawPixel(cx - pkS(16), hy - 1, CHASSIS_HI);
+  _t->fillCircle(cx + pkS(15), hy, hr, CHASSIS);
+  _t->drawCircle(cx + pkS(15), hy, hr, CHASSIS_SH);
+  _t->drawPixel(cx + pkS(14), hy - 1, CHASSIS_HI);
 }
 
 // Tiny laptop sat in front of gr0m, glowing green screen with fake code.
 // Drawn between chest and bottom edge of screen so it reads as "on lap".
 static void drawLaptop(uint32_t t) {
+  // Canvas geometry is in absolute screen units (keyboard y=114, screen
+  // y=102) — it sits low, "on the lap" near the screen bottom, NOT up at the
+  // chest. Anchor to those coords and run them through pk* so the peek card
+  // shrink still works. cx=67 matches the canvas x-center (laptop spans
+  // x=48..86, center ≈67).
   int cx = pkX(HX);
-  int kx = cx - pkS(20), ky = pkY(HY + 36);  // keyboard base
-  int kw = pkS(40), kh = pkS(3); if (kh < 1) kh = 1;
-  // Keyboard base + lip
-  _t->fillRect(kx, ky, kw, kh, 0x3186);
-  _t->drawFastHLine(kx, ky + kh, kw, INK);
-  // Key hint dots
-  for (int i = 0; i < 8; i++) _t->drawPixel(kx + pkS(3 + i * 5), ky + 1, 0x7BEF);
-  // Hinge
-  _t->drawFastHLine(kx + pkS(2), ky - 1, kw - pkS(4), 0x52AA);
-  // Screen bezel
-  int sx = kx + pkS(4), sy = ky - pkS(14);
-  int sw = kw - pkS(8), sh = pkS(13); if (sh < 1) sh = 1;
-  _t->fillRect(sx, sy, sw, sh, INK);
-  _t->fillRect(sx + 1, sy + 1, sw - 2, sh - 2, 0x0660);
-  // Fake code lines — light green pixels in a vague pattern
-  _t->drawFastHLine(sx + pkS(2),  sy + pkS(2), pkS(6),  0x07E0);
-  _t->drawFastHLine(sx + pkS(9),  sy + pkS(2), pkS(4),  0x07E0);
-  _t->drawFastHLine(sx + pkS(2),  sy + pkS(4), pkS(3),  0x07E0);
-  _t->drawFastHLine(sx + pkS(6),  sy + pkS(4), pkS(8),  0x07E0);
-  _t->drawFastHLine(sx + pkS(2),  sy + pkS(6), pkS(10), 0x07E0);
-  _t->drawFastHLine(sx + pkS(13), sy + pkS(6), pkS(2),  0x07E0);
-  _t->drawFastHLine(sx + pkS(2),  sy + pkS(8), pkS(5),  0x07E0);
-  // Blinking cursor
-  if ((t / 2) & 1) _t->fillRect(sx + pkS(14), sy + pkS(8), 2, 1, SPECULAR);
+  int kx = cx - pkS(19), ky = pkY(114);      // keyboard base (canvas 48,114)
+  int kw = pkS(38), kh = pkS(3); if (kh < 1) kh = 1;
+  // Keyboard base + lip shadow
+  _t->fillRect(kx, ky, kw, kh, 0x39E8);                       // #3a3d40
+  _t->drawFastHLine(kx - 1, ky + kh, kw + 2, 0x18E4);         // #1a1d20 lip
+  // Key hint dots (8 keys at x=50+i*4.5)
+  for (int i = 0; i < 8; i++)
+    _t->drawPixel(cx - pkS(17) + pkS((i * 9) / 2), ky + 1, 0x7BF0);  // #7a7d80
+  // Hinge strip just above the keyboard
+  _t->drawFastHLine(cx - pkS(17), ky - 1, pkS(34), 0x5AEC);   // #5a5d60
+  // Screen bezel + glowing panel (canvas bezel 51,102,32,12; screen 52,103,30,10)
+  int sx = cx - pkS(16), sy = pkY(102);
+  int sw = pkS(32), sh = pkS(12); if (sh < 1) sh = 1;
+  _t->fillRect(sx, sy, sw, sh, 0x18E4);                       // #1a1d20 bezel
+  _t->fillRect(sx + 1, sy + 1, sw - 2, sh - 2, 0x0C47);       // #0f8a3a screen
+  // Fake code lines — DIM green glyphs over the brighter screen (canvas
+  // #1a4a22, deliberately darker than the panel). Coords relative to bezel:
+  // canvas absolute (54,105)→bezel+(3,3), etc.
+  _t->drawFastHLine(sx + pkS(3),  sy + pkS(3), pkS(6),  0x1A44);
+  _t->drawFastHLine(sx + pkS(11), sy + pkS(3), pkS(4),  0x1A44);
+  _t->drawFastHLine(sx + pkS(3),  sy + pkS(5), pkS(3),  0x1A44);
+  _t->drawFastHLine(sx + pkS(8),  sy + pkS(5), pkS(8),  0x1A44);
+  _t->drawFastHLine(sx + pkS(3),  sy + pkS(7), pkS(10), 0x1A44);
+  _t->drawFastHLine(sx + pkS(15), sy + pkS(7), pkS(2),  0x1A44);
+  // Blinking cursor — bright mint (canvas #a4ffb4 at 70,111 → bezel+(19,9))
+  if ((t / 2) & 1) _t->fillRect(sx + pkS(19), sy + pkS(9), pkS(2), 1, 0xA7F6);
 }
 
 // Speech bubble floating above gr0m's head. White rounded rect with black
@@ -961,11 +982,14 @@ static void drawLaptop(uint32_t t) {
 // shrunk peek figure.
 static void drawSpeechBubble(const char* text, uint16_t textColor) {
   int len = 0; while (text[len]) len++;
-  int w = len * 6 + 6;
+  int w = len * 6 + 6; if (w < 20) w = 20;   // canvas min width
   int h = 12;
   int headX = pkX(HX);                 // who's talking — head center
-  // Center the bubble over the head, then clamp horizontally on screen.
-  int x = headX - w / 2;
+  // Canvas places the bubble up and to the RIGHT of the head (jsx x=95;
+  // SPEC `x = HX + 30`) with the tail angling back-left to the head. Offset
+  // it to the upper-right, then clamp horizontally so it stays on the 135-px
+  // screen.
+  int x = headX + 30;
   if (x + w > 134) x = 134 - w;
   if (x < 1) x = 1;
   // Sit the bubble above the head, but never let it (or its tail anchor) clip
@@ -998,17 +1022,19 @@ static void drawPartyHat() {
   int fx = faceOffX();
   int fy = faceOffY();
   int hx = pkX(HX + fx);
-  int hy = pkY(HY - HH/2 + fy);
-  int up = pkS(18), out = pkS(10), lo = pkS(2);
-  _t->fillTriangle(hx, hy - up, hx - out, hy - lo, hx + out, hy - lo, CRIMSON);
-  _t->drawTriangle(hx, hy - up, hx - out, hy - lo, hx + out, hy - lo, INK);
-  // Stripes
-  _t->drawLine(hx - pkS(5), hy - pkS(9), hx + pkS(5), hy - pkS(9), SPECULAR);
-  _t->drawLine(hx - pkS(7), hy - pkS(5), hx + pkS(7), hy - pkS(5), SPECULAR);
-  // Pom pom
-  int pr = pkS(2); if (pr < 1) pr = 1;
-  _t->fillCircle(hx, hy - pkS(19), pr, 0xFFE0);
-  _t->drawPixel(hx, hy - pkS(20), SPECULAR);
+  int hy = pkY(HY - HH/2 + fy);       // head top = canvas y=32 = hat base
+  // Canvas: triangle 67,12 / 56,32 / 78,32 — base sits ON the head top, apex
+  // 20 px up, half-width 11. Crimson fill, dark outline.
+  int up = pkS(20), out = pkS(11);
+  _t->fillTriangle(hx, hy - up, hx - out, hy, hx + out, hy, CRIMSON);
+  _t->drawTriangle(hx, hy - up, hx - out, hy, hx + out, hy, INK);
+  // White stripes (canvas y=22 / y=28 → 10 / 4 px above the base)
+  _t->drawLine(hx - pkS(5), hy - pkS(10), hx + pkS(6), hy - pkS(10), SPECULAR);
+  _t->drawLine(hx - pkS(8), hy - pkS(4),  hx + pkS(9), hy - pkS(4),  SPECULAR);
+  // Yellow pom at the tip (canvas circle 67,11 r=3 #ffd60a)
+  int pr = pkS(3); if (pr < 1) pr = 1;
+  _t->fillCircle(hx, hy - pkS(21), pr, 0xFEA1);   // #ffd60a
+  _t->drawPixel(hx - 1, hy - pkS(22), SPECULAR);
 }
 
 // Nightcap — drooping cap that hangs to the right, white trim band, pom.
@@ -1017,11 +1043,15 @@ static void drawNightcap() {
   int fy = faceOffY();
   int hx = pkX(HX + fx);
   int hy = pkY(HY - HH/2 + fy);
-  int half = pkS(24), bandH = pkS(4); if (bandH < 1) bandH = 1;
-  // White trim band wrapping the head top
-  _t->fillRect(hx - half, hy - 1, half * 2, bandH, SPECULAR);
-  _t->drawFastHLine(hx - half, hy - 1, half * 2, 0xC638);
-  // Drooping body — curves up and to the right
+  int half = pkS(24), bandH = pkS(3); if (bandH < 1) bandH = 1;
+  // White trim band wrapping the head top (canvas Px 42,34,48,3 — sits on
+  // the forehead just below the head top at y=32).
+  _t->fillRect(hx - half, hy + 1, half * 2, bandH, SPECULAR);
+  _t->drawFastHLine(hx - half, hy + 1, half * 2, 0xC638);
+  // Drooping body — a magenta cap that humps up near center-left and slumps
+  // down to the right where the pom hangs. The canvas draws this as a bezier
+  // (M42,36 Q55,14 88,36 …); here it's approximated by a stack of HLines that
+  // climb up and to the right — see report note on the curve simplification.
   int segs = (buddyScale() == 1) ? 9 : 18;
   for (int i = 0; i < segs; i++) {
     int y = hy - pkS(3) - i;
@@ -1029,9 +1059,14 @@ static void drawNightcap() {
     int xRight = hx - pkS(8)  + pkS(i * 2);
     _t->drawFastHLine(xLeft, y, xRight - xLeft, VISOR_LOVE);
   }
-  // Pom pom at the tip
-  int px = hx + pkS(18), py = hy - pkS(22);
+  // Pom-pom on the slumped tip — sways toward the down-side with device tilt
+  // (canvas: pomX=88+clamp(tilt*0.4,±12), pomY=20+|tilt|*0.2). Uses the
+  // existing parallax tilt, not the later #tilt-gravity detach behavior.
+  int sway = _tiltX; if (sway < -12) sway = -12; if (sway > 12) sway = 12;
+  int px = hx + pkS(18) + pkS(sway), py = hy - pkS(22) + pkS(abs(_tiltX) / 5);
   int pr = pkS(3); if (pr < 1) pr = 1;
+  // Short magenta stalk from the cap tip out to the pom (canvas line, w4)
+  _t->drawLine(hx + pkS(8), hy - pkS(20), px, py, VISOR_LOVE);
   _t->fillCircle(px, py, pr, SPECULAR);
   _t->drawPixel(px - 1, py - 1, 0xC638);
 }
@@ -1063,7 +1098,8 @@ static void drawConfetti(uint32_t t) {
   bool peek = (buddyScale() == 1);
   int n = peek ? 7 : 14;
   int maxY = peek ? 64 : 132;
-  static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, 0xFD20 };
+  // Canvas club palette: #ff2d92, #ffd60a, #00bdff, #29d65b, #ff8c1a.
+  static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, 0xFC63 };
   for (int i = 0; i < n; i++) {
     int phase = ((int)t * 2 + i * 11) % 40;
     int x = (i * 11 + (int)t * 3) % 135;
@@ -1119,6 +1155,41 @@ static void drawChestLCD(const char* text) {
   _t->setTextColor(0x5FE0, 0x02E0);
   _t->setCursor(cx - textLen * 3, cy - 3);
   _t->print(text);
+}
+
+// Tiny pixel desk + coffee mug + steam, sat under gr0m as a screen-bottom
+// band. Canvas #desk: desk top at y=132-134, mug at y=126-132, steam rising
+// to y=120. The SVG units map 1:1 to device pixels, so the canvas coords are
+// used almost verbatim — only the desk-top width is trimmed (x20→w90, ending
+// at x=110) so it fits the 110-px-wide landscape pet sprite.
+//
+// LANDSCAPE-CLOCK ONLY: in the canvas the desk pairs with the landscape clock
+// screen. That mode is the only one that renders the bot to a surface other
+// than the main `spr` (it draws to petSpr / M5.Lcd via buddyRenderTo), so we
+// gate on that. Portrait home, peek cards, and the DJ/costume scenes (all on
+// `spr`) are unaffected — no desk appears there.
+static void drawDesk() {
+  if (buddyTarget() == &spr) return;     // landscape clock surfaces only
+  if (buddyScale() != 1) return;         // landscape clock always renders at 1×
+  // Desk top — two stacked bands (canvas Px 20,132,94,2 + 20,134,94,1).
+  // Trimmed to w=90 so the right edge lands at x=110, the pet-sprite width.
+  _t->fillRect(20, 132, 90, 2, 0x6A45);  // #6b4a2a desk surface
+  _t->drawFastHLine(20, 134, 90, 0x3943);// #3a2818 front-edge shadow
+  // Coffee mug (canvas 28,126 8×6) — white body, dark rims top + bottom.
+  _t->fillRect(28, 126, 8, 6, 0xFFFF);
+  _t->drawFastHLine(28, 126, 8, 0x2104); // #222 rim
+  _t->drawFastHLine(28, 131, 8, 0x2104); // #222 base
+  // Handle (canvas 36,127 2×3 white + 37,127 1×3 dark)
+  _t->fillRect(36, 127, 2, 3, 0xFFFF);
+  _t->drawFastVLine(37, 127, 3, 0x2104);
+  // Coffee surface (canvas 29,127 6×1 #3a1808)
+  _t->drawFastHLine(29, 127, 6, 0x38C1);
+  // Steam wisps rising off the mug (canvas faint #dadddf dotted lines). 8-bit
+  // sprites can't alpha-blend, so the fainter wisps use a dimmer grey instead
+  // of opacity — see report note.
+  _t->fillRect(30, 122, 1, 2, 0xDEFB);   // near wisp (op 0.7)
+  _t->fillRect(32, 120, 1, 2, 0x9CD3);   // far wisp  (op 0.5 → dimmer grey)
+  _t->drawPixel(34, 123, 0xDEFB);        // small puff
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1821,6 +1892,11 @@ static void doIdle(uint32_t t) {
   readTilt();
   _yProjOff = 0;
   drawShadow(0);
+  // Pixel desk + coffee mug under the bot — only paints in landscape clock
+  // mode (drawDesk() self-gates on the render surface), matching the canvas
+  // "AT HIS DESK" scene that pairs the desk with the sideways clock. Drawn
+  // before the body so the bot sits in front of it.
+  drawDesk();
   drawChest3D();
   // NEW: cycle the chest bolt with a tiny green LCD showing live token count.
   // 14 frames bolt, 6 frames LCD — keeps the brand mark dominant but lets
