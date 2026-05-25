@@ -11,7 +11,8 @@
 typedef unsigned char byte;
 typedef bool boolean;
 
-static inline unsigned long millis() { return 0UL; }
+extern unsigned long _grender_clock_ms;          // advanced by the render harness
+static inline unsigned long millis() { return _grender_clock_ms; }
 static inline unsigned long micros() { return 0UL; }
 static inline void delay(unsigned long) {}
 static inline void yield() {}

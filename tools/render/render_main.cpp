@@ -16,6 +16,7 @@ static uint16_t FB[SW * SH];
 // Globals normally owned by main.cpp.
 TFT_eSprite spr;
 _M5Device   M5;
+unsigned long _grender_clock_ms = 0;   // fake millis() the harness advances per frame
 uint8_t  g_evoStage   = 5;
 uint32_t g_dispTokens = 123456;
 
@@ -38,6 +39,7 @@ int main(int argc, char** argv) {
   int state = argc > 2 ? atoi(argv[2]) : 1;
   int scale = argc > 3 ? atoi(argv[3]) : 2;
   const char* out = argc > 4 ? argv[4] : "out.ppm";
+  int frame = argc > 5 ? atoi(argv[5]) : 0;   // animation frame (advances tickCount)
 
   spr.setFB(FB, SW, SH);
   buddyInit();
@@ -46,7 +48,8 @@ int main(int argc, char** argv) {
   buddySetPeek(scale == 1);
   for (int i = 0; i < SW * SH; i++) FB[i] = 0x0000;   // device bg = black
   buddyInvalidate();
-  buddyTick((uint8_t)state);   // draws the character into FB through spr
+  // Advance the fake clock so buddyTick ticks the animation up to `frame`.
+  for (int i = 0; i <= frame; i++) { _grender_clock_ms = (unsigned long)i * 200UL; buddyTick((uint8_t)state); }
   writePPM(out);
   return 0;
 }
