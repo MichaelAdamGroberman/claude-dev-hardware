@@ -18,7 +18,6 @@ Tools:
   gr0m_token_period(period)         day | week | month | all
   gr0m_level_reset()                reset the lifetime-token baseline (life → 0,
                                     character visually de-evolves to Stage 0)
-  gr0m_dj(on)                       toggle DJ mode on the device
 """
 import json
 import socket
@@ -77,16 +76,6 @@ TOOLS = [
          "Use with care; the on-device equivalent requires a tap-twice confirm."
      ),
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "gr0m_dj",
-     "description": (
-         "Toggle DJ mode on the gr0m device. When on=true, the device renders a "
-         "full DJ booth scene (gr0m on the decks, turntables, mixer, VU meter, "
-         "note particles, ~124 BPM beat). DJ mode is mutually exclusive with "
-         "adapter mode. In-memory only — a device reset returns it to normal mode."
-     ),
-     "inputSchema": {"type": "object",
-                     "properties": {"on": {"type": "boolean"}},
-                     "required": ["on"]}},
     {"name": "gr0m_gpio_read",
      "description": "Read a digital GPIO pin. Allowed pins: 0, 25, 26, 32, 33, 36.",
      "inputSchema": {"type": "object",
@@ -173,12 +162,6 @@ def _call_tool(name: str, args: dict) -> str:
         return json.dumps(_daemon({"op": "token", "action": "period", "value": args.get("period", "day")}))
     if name == "gr0m_level_reset":
         return json.dumps(_daemon({"op": "token", "action": "level_reset"}))
-    if name == "gr0m_dj":
-        on = bool(args.get("on", True))
-        r = _daemon({"op": "send", "cmd": {"cmd": "dj", "on": on}})
-        if r.get("ok"):
-            return "DJ mode ON — gr0m is on the decks" if on else "DJ mode OFF"
-        return json.dumps(r)
     if name == "gr0m_gpio_read":
         return json.dumps(_daemon({"op": "query", "ack": "gpio",
             "cmd": {"cmd": "gpio", "act": "read", "pin": int(args.get("pin", -1))}}))

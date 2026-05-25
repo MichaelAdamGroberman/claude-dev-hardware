@@ -69,10 +69,11 @@ for setup details see **[tools/cc-bridge/README.md](tools/cc-bridge/README.md)**
   menus, opened with a long-press of **A** on the matching info page, cover a
   **Connection** screen (WiFi / BT / Off / Adapter) and a **Usage** screen
   (reporting window, plus reset-counters and reset-buddy-level).
-- **DJ mode** — a bonus full-detail scene (turntables, mixer, VU-meter visor,
-  headphones, note particles on an internal beat), toggled from Settings or
-  `{"cmd":"dj"}` / the `gr0m_dj` MCP tool; unlocked as the reward for reaching
-  the final evolution stage.
+- **DJ mode** — the end-game upgrade. It's **not** a toggle: once the character
+  reaches the final evolution stage (Stage 5, 250M lifetime tokens) it breaks
+  into a full-detail DJ-booth scene on its own (turntables, mixer, VU-meter
+  visor, headphones, note particles on an internal beat) — during celebrations
+  and the occasional idle flourish. Earned, not switched on.
 
 > **Design notes:** [docs/superpowers/specs/](docs/superpowers/specs/) has the
 > full evolution / DJ / menu design spec.

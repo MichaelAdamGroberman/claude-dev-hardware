@@ -45,13 +45,21 @@ def main() -> int:
     tool_name = payload.get("tool_name", "?")
     tool_input = payload.get("tool_input", {}) or {}
 
-    # In "accept edits" mode Claude auto-approves file edits, so there is no
-    # decision left to make — don't wake the device for them. Other modes,
-    # and non-edit tools (e.g. Bash) in any mode, still prompt as usual.
-    if payload.get("permission_mode") == "acceptEdits" and tool_name in (
-        "Edit", "Write", "MultiEdit", "NotebookEdit"
-    ):
-        return 0
+    # Only wake the device when the user's approval is actually required. In
+    # modes that auto-run the tool there is nothing to decide, so pass through
+    # silently (no device prompt). Check both field spellings to be safe, and
+    # log what Claude Code actually sends so the gating can be verified.
+    mode = payload.get("permission_mode") or payload.get("permissionMode") or ""
+    try:
+        with (Path.home() / ".cache" / "claude-buddy" / "hook-debug.log").open("a") as _f:
+            _f.write(f"{tool_name}\tmode={mode!r}\n")
+    except Exception:
+        pass
+    EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+    if mode in ("bypassPermissions", "plan"):
+        return 0                                   # nothing requires approval
+    if mode == "acceptEdits" and tool_name in EDIT_TOOLS:
+        return 0                                   # edits auto-accepted
 
     # Build a short hint string. Bash commands are the most important
     # case so prefer the command itself; otherwise pick a meaningful

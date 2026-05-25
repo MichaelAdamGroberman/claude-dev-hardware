@@ -567,6 +567,13 @@ class BuddyLink:
         while True:
             await asyncio.sleep(HEARTBEAT_S)
             if self.is_connected() and not self.pending:
+                # Refresh lifetime LIVE each heartbeat — it was a one-time startup
+                # snapshot, which froze the device's level + FED bar during use.
+                # Off-thread so the (sync) transcript scan never blocks the loop.
+                try:
+                    self._lifetime_cached = await asyncio.to_thread(self._scan_all_lifetime_tokens)
+                except Exception as exc:
+                    log(f"lifetime rescan failed: {exc}")
                 await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
                 await self.push_tokens()
 

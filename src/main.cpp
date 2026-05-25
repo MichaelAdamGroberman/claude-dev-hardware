@@ -170,12 +170,12 @@ const uint8_t MENU_N = 6;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
-// Radio + adapter controls moved to the Connection submenu (drawConn); the
-// "dj" item toggles djMode (DJ-booth scene rendered elsewhere in gr0m.cpp).
-const char* settingsItems[] = { "brightness", "sound", "led", "mic claps", "transcript", "clock rot", "ascii pet", "dj", "reset", "back" };
-const uint8_t SETTINGS_N = 10;
+// Radio + adapter controls moved to the Connection submenu (drawConn). DJ is no
+// longer a manual setting — it's an automatic end-game flourish (see djActive in
+// loop(), unlocked at Stage 5), so there's no "dj" row here.
+const char* settingsItems[] = { "brightness", "sound", "led", "mic claps", "transcript", "clock rot", "ascii pet", "reset", "back" };
+const uint8_t SETTINGS_N = 9;
 extern bool adapterMode;   // defined near loop(); the Connection menu toggles it
-extern bool djMode;        // defined near adapterMode; the "dj" setting toggles it
 
 // Connection submenu — radio (WiFi/BT/Off) + Adapter, opened from the
 // CONNECTIONS info page (infoPage==4) via a BtnA long-press.
@@ -218,14 +218,8 @@ static void applySetting(uint8_t idx) {
     case 4: s.hud = !s.hud; break;   // transcript
     case 5: s.clockRot = (s.clockRot + 1) % 3; break;
     case 6: nextPet(); return;       // ascii pet
-    case 7:  // dj — toggle the DJ-booth scene (rendered in gr0m.cpp). In-memory;
-             // enabling clears adapter mode (the two scenes are exclusive).
-      djMode = !djMode;
-      if (djMode) adapterMode = false;
-      characterInvalidate();
-      return;
-    case 8: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 9: settingsOpen = false; characterInvalidate(); return;
+    case 7: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
+    case 8: settingsOpen = false; characterInvalidate(); return;
   }
   settingsSave();
 }
@@ -328,8 +322,9 @@ static void drawSettings() {
   spr.print("SETTINGS");
 
   Settings& s = settings();
-  // On/off rows in the new layout: 1=sound 2=led 3=mic 4=transcript 7=dj.
-  // 5=clock rot (enum), 6=ascii pet (count); 0=brightness; 8/9 = reset/back.
+  // On/off rows in the new layout: 1=sound 2=led 3=mic 4=transcript.
+  // 5=clock rot (enum), 6=ascii pet (count); 0=brightness; 7/8 = reset/back
+  // (no value column).
   int rowsTop = my + HEADER_H + 2;
   for (int i = 0; i < SETTINGS_N; i++) {
     bool sel = (i == settingsSel);
@@ -357,9 +352,6 @@ static void drawSettings() {
       uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
       spr.setTextColor(p.body, PANEL);
       spr.printf("%u/%u", pos, total);
-    } else if (i == 7) {
-      spr.setTextColor(djMode ? GREEN : p.textDim, PANEL);
-      spr.print(djMode ? " on" : "off");
     }
   }
 
@@ -1055,11 +1047,7 @@ void drawInfo() {
     spr.setTextColor(p.text, p.bg);
     spr.setTextSize(2);
     spr.setCursor(4, y);
-    { char ub[12]; uint32_t uv = stats().tokens;
-      if (uv >= 1000000)   snprintf(ub, sizeof(ub), "%lu.%luM", uv / 1000000, (uv / 100000) % 10);
-      else if (uv >= 1000) snprintf(ub, sizeof(ub), "%luK", uv / 1000);
-      else                 snprintf(ub, sizeof(ub), "%lu", (unsigned long)uv);
-      spr.print(ub); }
+    spr.printf("%lu", (unsigned long)stats().tokens);   // full exact count — the Usage screen is the detailed view
     spr.setTextSize(1);
     spr.setTextColor(p.textDim, p.bg);
     spr.setCursor(4, y + 18); spr.print("tokens");
@@ -1371,9 +1359,11 @@ static void drawPetStats(const Palette& p) {
 
   // Token short formatter — returns char* in caller-owned buffer
   auto tokStr = [](char* buf, size_t bsz, uint32_t v) -> const char* {
-    if (v >= 1000000)   snprintf(buf, bsz, "%lu.%luM", v / 1000000, (v / 100000) % 10);
-    else if (v >= 1000) snprintf(buf, bsz, "%lu.%luK", v / 1000, (v / 100) % 10);
-    else                snprintf(buf, bsz, "%lu", (unsigned long)v);
+    if      (v >= 1000000000UL) snprintf(buf, bsz, "%lu.%luB", v / 1000000000UL, (v / 100000000UL) % 10);
+    else if (v >= 10000000UL)   snprintf(buf, bsz, "%luM", v / 1000000UL);                       // 42M
+    else if (v >= 1000000UL)    snprintf(buf, bsz, "%lu.%luM", v / 1000000UL, (v / 100000UL) % 10); // 3.7M
+    else if (v >= 1000UL)       snprintf(buf, bsz, "%luK", v / 1000UL);                           // 679K (no decimal)
+    else                        snprintf(buf, bsz, "%lu", (unsigned long)v);
     return buf;
   };
 
@@ -1763,29 +1753,23 @@ void setup() {
 // mode). Strips the desk-pet rendering + mic so the device is a focused
 // GPIO/logic probe; the command transports keep running.
 bool adapterMode = false;
-// DJ-booth scene flag — toggled by the "dj" Settings item (and elsewhere over
-// the transports/MCP). In-memory; the scene itself is rendered in gr0m.cpp.
-bool djMode = false;
+// DJ-booth scene flag — NOT a user toggle. Recomputed every frame in loop()
+// (see djActive) purely from the character's state: it's the automatic end-game
+// flourish, unlocked at Stage 5, played during celebrations and on a periodic
+// idle drop-in. The scene itself is rendered in gr0m.cpp.
+bool djActive = false;
 // DJ-booth scene renderer — lives in gr0m.cpp (to reach its file-static
 // draw primitives), composed onto the surface we pass in.
 extern void gr0mRenderDJ(TFT_eSPI*, uint32_t);
 
-// DJ mode tick — render the booth scene into the offscreen sprite and blit.
-// Mirrors adapterTick: BtnB exits without a reset. Runs AFTER dataPoll +
-// transport ticks in loop(), so MCP/serial can still toggle djMode off.
+// DJ scene tick — render the booth scene into the offscreen sprite and blit.
+// Fully automatic: there is no exit button and no manual toggle. loop() drives
+// it via djActive (Stage-5 celebrate, or the periodic idle flourish window),
+// and stops calling it when that condition clears. Runs AFTER dataPoll +
+// transport ticks so commands are still serviced each frame.
 static void djTick(uint32_t now) {
-  if (M5.BtnB.wasPressed()) {
-    djMode = false;
-    characterInvalidate();
-    return;
-  }
   spr.fillSprite(TFT_BLACK);
   gr0mRenderDJ(&spr, now);
-  // Exit hint, bottom-left, dim cyan.
-  spr.setTextSize(1);
-  spr.setTextColor(0x07FF, TFT_BLACK);
-  spr.setCursor(4, H - 10);
-  spr.print("BtnB: exit");
   spr.pushSprite(0, 0);
 }
 
@@ -1894,11 +1878,24 @@ void loop() {
   // normal UI. A reset clears adapterMode and returns to BT/WiFi pet mode.
   if (adapterMode) { adapterTick(now); return; }
 
-  // DJ mode: full-detail "gr0m on the decks" scene. Same placement as the
-  // adapter short-circuit — commands were just serviced (dataPoll + transports
-  // above), so MCP/serial can still toggle djMode off while it runs. BtnB
-  // (inside djTick) or a reset exits.
-  if (djMode) { djTick(now); return; }
+  // DJ scene: the automatic end-game flourish, unlocked only at Stage 5. No
+  // manual toggle and no exit button — djActive is recomputed here every frame:
+  //   1. Celebration: any time the character is celebrating (activeState ==
+  //      P_CELEBRATE), play the DJ booth instead of the normal celebrate.
+  //   2. Idle flourish: when otherwise idle, drop into the booth for ~8 s once
+  //      every ~60 s (millis()-based window), then return to the normal pet.
+  // Same placement as the adapter short-circuit — commands were just serviced
+  // (dataPoll + transports above), so the link keeps working while it runs.
+  {
+    const uint32_t DJ_PERIOD_MS = 60000;   // idle cadence: a drop-in once a minute
+    const uint32_t DJ_WINDOW_MS = 8000;    // and it lasts ~8 s
+    bool stage5     = evoStage() >= 5;
+    bool celebrate  = activeState == P_CELEBRATE;
+    bool idle       = activeState == P_IDLE;
+    bool flourish   = idle && (now % DJ_PERIOD_MS) < DJ_WINDOW_MS;
+    djActive = stage5 && (celebrate || flourish);
+  }
+  if (djActive) { djTick(now); return; }
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;
@@ -2032,8 +2029,8 @@ void loop() {
 
   // Stage-5 DJ-unlock announce (one-time per boot). statsSetTokens latches
   // _djUnlocked the first time the character reaches Stage 5; when we observe
-  // that edge live, play a brief celebration. djMode itself is toggleable from
-  // day one regardless of stage — this is purely the bonus payoff.
+  // that edge live, play a brief celebration. This banner marks the moment the
+  // automatic DJ flourish (see djActive in loop()) becomes available.
   static bool djWasUnlocked = statsDjUnlocked();
   static uint32_t djAnnounceUntil = 0;
   if (!djWasUnlocked && statsDjUnlocked()) {
@@ -2047,7 +2044,8 @@ void loop() {
   bool clocking = displayMode == DISP_NORMAL
                && !menuOpen && !settingsOpen && !resetOpen && !connOpen && !usageOpen && !inPrompt
                && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
-               && dataRtcValid() && _onUsb;
+               && dataRtcValid()
+               && (_onUsb || bleConnected() || netWifiOnline());   // show once linked, not USB-only
   if (clocking) clockUpdateOrient();
   else { clockOrient = 0; orientFrames = 0; paintedOrient = 0; }
   bool landscapeClock = clocking && clockOrient != 0;
