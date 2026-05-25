@@ -67,6 +67,21 @@ html,body{
   max-width:520px;
   line-height:1.6;
 }
+/* ── proof-of-concept banner ─────────────────────────────────── */
+.poc-banner{
+  display:inline-flex;align-items:center;gap:7px;
+  margin:14px auto 0;
+  padding:5px 14px;
+  border-radius:999px;
+  background:var(--coral-soft);
+  border:1px solid var(--coral-dim);
+  font-family:"DM Mono",monospace;
+  font-size:11px;font-weight:500;
+  color:#7a3520;
+  letter-spacing:.02em;
+}
+.poc-banner svg{flex-shrink:0}
+
 .badge-row{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-top:18px}
 .badge{
   display:inline-flex;align-items:center;gap:5px;
@@ -512,6 +527,10 @@ html,body{
 <header class="page-header" role="banner">
   <h1><span class="accent">gr0m</span> · Hardware Buddy Dashboard</h1>
   <p class="sub">Live device mirror, permission prompts, activity stream, and character management for the M5StickC Plus desk pet.</p>
+  <p class="poc-banner" role="note" aria-label="Proof of concept notice">
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><circle cx="6.5" cy="6.5" r="5.5" stroke="#7a3520" stroke-width="1.2"/><rect x="6" y="5.5" width="1" height="4" rx=".5" fill="#7a3520"/><rect x="6" y="3.5" width="1" height="1.2" rx=".5" fill="#7a3520"/></svg>
+    Proof of concept &mdash; static mockup, not a shipped app
+  </p>
   <div class="badge-row" aria-label="Status badges">
     <span class="badge live"><span class="dot" aria-hidden="true"></span> Live device pairing</span>
     <span class="badge">M5StickC Plus</span>
@@ -839,7 +858,7 @@ html,body{
               </div>
               <div class="char-info">
                 <strong>gr0m</strong>
-                <p>ASCII &middot; 3D head &middot; accel parallax</p>
+                <p>Vector &middot; 3D head &middot; accel parallax</p>
               </div>
               <span class="pill" style="background:#eaf7ee;color:var(--success)">
                 <span class="pdot" style="background:var(--success)" aria-hidden="true"></span>
