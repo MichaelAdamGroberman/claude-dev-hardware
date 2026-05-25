@@ -91,6 +91,11 @@ const uint16_t DS_SUBOT   = 0x0801;   // #08020a stage-up gradient bottom
 enum PersonaState { P_SLEEP, P_IDLE, P_BUSY, P_ATTENTION, P_CELEBRATE, P_DIZZY, P_HEART };
 const char* stateNames[] = { "sleep", "idle", "busy", "attention", "celebrate", "dizzy", "heart" };
 
+// gr0m ride-mode controls (#tilt-skate/#tilt-surf/#tilt-hover) — implemented
+// in gr0m.cpp. Cycle off→skate→surf→hover→off via the settings "ride" row.
+extern void    gr0mCycleRide();
+extern uint8_t gr0mRideMode();
+
 TamaState    tama;
 PersonaState baseState   = P_SLEEP;
 PersonaState activeState = P_SLEEP;
@@ -183,11 +188,20 @@ bool     napping = false;
 uint32_t napStartMs = 0;
 uint32_t promptArrivedMs = 0;
 
-// Face-down = Z-axis dominant and negative. Debounced so a toss doesn't count.
+// Face-down = Z-axis dominant and negative (SPEC #tilt-nap: gravity-down
+// < -0.7g). Debounced so a toss doesn't count.
 static bool isFaceDown() {
   float ax, ay, az;
   M5.Imu.getAccelData(&ax, &ay, &az);
   return az < -0.7f && fabsf(ax) < 0.4f && fabsf(ay) < 0.4f;
+}
+
+// Picked back up — SPEC #tilt-nap exit: |gravity-down| < 0.5g. The 0.5..0.7g
+// band is a deliberate hysteresis gap so the nap doesn't bounce at the edge.
+static bool isFaceUp() {
+  float ax, ay, az;
+  M5.Imu.getAccelData(&ax, &ay, &az);
+  return fabsf(az) < 0.5f;
 }
 
 static void applyBrightness() { M5.Axp.ScreenBreath(20 + brightLevel * 20); }
@@ -257,9 +271,10 @@ uint8_t settingsSel  = 0;
 // Labels kept short so each row fits at BODY size (size 2) alongside the
 // right-aligned value column in the shared list look (drawListMenu). Indices
 // must stay aligned with applySetting()/settingsMeta(): 0 bright, 1 sound,
-// 2 led, 3 mic, 4 transcript(hud), 5 clock rot, 6 ascii pet, 7 reset, 8 back.
-const char* settingsItems[] = { "bright", "sound", "led", "mic", "hud", "clock", "pet", "reset", "back" };
-const uint8_t SETTINGS_N = 9;
+// 2 led, 3 mic, 4 transcript(hud), 5 clock rot, 6 worldUp (#tilt-worldup),
+// 7 ride mode (#tilt-skate/surf/hover), 8 ascii pet, 9 reset, 10 back.
+const char* settingsItems[] = { "bright", "sound", "led", "mic", "hud", "clock", "world", "ride", "pet", "reset", "back" };
+const uint8_t SETTINGS_N = 11;
 extern bool adapterMode;   // defined near loop(); the Connection menu toggles it
 
 // Connection submenu — radio (WiFi/BT/Off) + Adapter, opened from the
@@ -302,9 +317,15 @@ static void applySetting(uint8_t idx) {
     case 3: s.mic = !s.mic; micSetEnabled(s.mic); break;
     case 4: s.hud = !s.hud; break;   // transcript
     case 5: s.clockRot = (s.clockRot + 1) % 3; break;
-    case 6: nextPet(); return;       // ascii pet
-    case 7: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 8: settingsOpen = false; characterInvalidate(); return;
+    case 6: s.worldUp = !s.worldUp;  // #tilt-worldup
+            // Clear any worldUp rotation immediately when turning it off so
+            // the home view snaps back upright without waiting for a re-tilt.
+            if (!s.worldUp) M5.Lcd.setRotation(0);
+            break;
+    case 7: gr0mCycleRide(); return; // #tilt-ride: off→skate→surf→hover→off
+    case 8: nextPet(); return;       // ascii pet
+    case 9: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
+    case 10: settingsOpen = false; characterInvalidate(); return;
   }
   settingsSave();
 }
@@ -567,10 +588,17 @@ static void settingsMeta(int i, char* out, size_t osz, uint16_t* col, bool* dang
     static const char* const RN[] = { "auto", "port", "land" };
     snprintf(out, osz, "%s", RN[s.clockRot]); *col = DS_ORANGE;
   } else if (i == 6) {
+    snprintf(out, osz, "%s", s.worldUp ? "on" : "off");
+    *col = s.worldUp ? DS_GREEN : DS_DIM;
+  } else if (i == 7) {
+    static const char* const RD[] = { "off", "skate", "surf", "hover" };
+    snprintf(out, osz, "%s", RD[gr0mRideMode() & 3]);
+    *col = (gr0mRideMode() != 0) ? DS_GREEN : DS_DIM;
+  } else if (i == 8) {
     uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
     uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
     snprintf(out, osz, "%u/%u", pos, total); *col = DS_ORANGE;
-  } else if (i == 7) {
+  } else if (i == 9) {
     snprintf(out, osz, "!"); *col = DS_REDSOFT; *danger = true;
   }
 }
@@ -2808,30 +2836,68 @@ void loop() {
     if ((int32_t)(now - djAnnounceUntil) < 0) {
       drawStageUp(evoStage());
     }
-    spr.pushSprite(0, 0);
+    // #tilt-worldup — when the setting is on and the device is held clearly
+    // sideways, blit the sprite counter-rotated 90° so the head stays
+    // visually vertical (the "rotate the screen orientation" approach the
+    // SPEC calls out as the simplest acceptable impl). Skipped while any
+    // overlay/menu is open (those carry upright text) and while charging in
+    // a cradle. Falls back to the normal upright blit otherwise.
+    bool worldUpRot = false;
+    if (settings().worldUp && !resetOpen && !settingsOpen && !connOpen
+        && !usageOpen && !menuOpen && !blePasskey()) {
+      float ax, ay, az;
+      M5.Imu.getAccelData(&ax, &ay, &az);
+      if (fabsf(ax) > 0.7f && fabsf(az) < 0.5f) {
+        M5.Lcd.fillScreen(TFT_BLACK);   // clear the corners the rotated blit won't cover
+        M5.Lcd.setPivot(W / 2, H / 2);
+        spr.setPivot(W / 2, H / 2);
+        // Counter-rotate against the device tilt so "up" stays up.
+        spr.pushRotated((ax > 0) ? 90 : -90, TFT_BLACK);
+        worldUpRot = true;
+      }
+    }
+    if (!worldUpRot) spr.pushSprite(0, 0);
   }
 
-  // Face-down nap: dim immediately, pause animations, accumulate sleep time.
-  // Skipped during approval — you're holding it to read, not sleeping it.
-  // Exit needs sustained not-down so IMU noise at the threshold doesn't
-  // bounce brightness between 8 and full every few frames.
-  static int8_t faceDownFrames = 0;
+  // #tilt-nap — face-down nap. SPEC: enter on gravity-down < -0.7g held 3s,
+  // exit when |down| < 0.5g for 1s. (isFaceDown() reads the Z axis — the
+  // physical "into the table" axis on this hardware is Z, which is what the
+  // SPEC calls gravity_y in the sim's coordinate convention.) While napping
+  // we render the SLEEP scene so the nightcap + z-particles show (drawn by
+  // doSleep at Stage 4+), keep the screen dimmed, and refill energy at 5×.
+  // Hold timers replace the old frame counter so the 3s / 1s windows are
+  // wall-clock, not frame-rate, dependent. Skipped during approval.
+  static uint32_t faceDownSinceMs = 0;   // 0 = not currently face-down
+  static uint32_t faceUpSinceMs   = 0;   // 0 = not currently face-up (|az|<0.5)
   if (!inPrompt) {
-    bool down = isFaceDown();
-    if (down)       { if (faceDownFrames < 20) faceDownFrames++; }
-    else            { if (faceDownFrames > -10) faceDownFrames--; }
+    if (isFaceDown()) { if (!faceDownSinceMs) faceDownSinceMs = now; }
+    else              faceDownSinceMs = 0;
+    if (isFaceUp())   { if (!faceUpSinceMs) faceUpSinceMs = now; }
+    else              faceUpSinceMs = 0;
   }
 
-  if (!napping && faceDownFrames >= 15) {
+  if (!napping && faceDownSinceMs && (now - faceDownSinceMs) >= 3000) {
     napping = true;
     napStartMs = now;
+    statsNapBegin();              // capture energy baseline for the 5× refill
     M5.Axp.ScreenBreath(8);
     dimmed = true;
-  } else if (napping && faceDownFrames <= -8) {
+  } else if (napping && faceUpSinceMs && (now - faceUpSinceMs) >= 1000) {
     napping = false;
     statsOnNapEnd((now - napStartMs) / 1000);
     statsOnWake();
     wake();
+  }
+
+  // While napping: refill energy 5× and paint the sleep scene (nightcap +
+  // z-particles) into the sprite so the face-down nap actually shows the
+  // sleep mood per the SPEC, rather than freezing the prior frame.
+  if (napping) {
+    statsNapTick(now - napStartMs);
+    if (!landscapeClock && buddyMode) {
+      buddyTick(P_SLEEP);
+      spr.pushSprite(0, 0);
+    }
   }
 
   // millis() not the cached `now`: wake() runs after `now` is captured,

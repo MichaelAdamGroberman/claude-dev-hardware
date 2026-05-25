@@ -36,6 +36,17 @@ static int8_t _tiltX = 0;
 static int8_t _tiltY = 0;
 static int8_t _gravX = 0;
 
+// Tilt in DEGREES (linear g·90) for the SPEC behaviours.
+static float _tiltDegX = 0;
+static float _tiltDegY = 0;
+
+static float _headRotV = 0, _headRotP = 0;   // #tilt-bobble head spring
+
+// #tilt-gravity detach: ATTACHED→FALLING >35°, back <25° (hyst).
+enum ItemState : uint8_t { ITEM_ATTACHED = 0, ITEM_FALLING = 1, ITEM_SETTLED = 2 };
+static ItemState _hatState   = ITEM_ATTACHED;   // party hat
+static ItemState _shadeState = ITEM_ATTACHED;   // sunglasses
+
 static int8_t _clamp(float v, int lo, int hi) {
   int iv = (int)(v + (v >= 0 ? 0.5f : -0.5f));
   if (iv < lo) iv = lo;
@@ -43,12 +54,21 @@ static int8_t _clamp(float v, int lo, int hi) {
   return (int8_t)iv;
 }
 
+static void updateItemDetach(ItemState& st) {
+  float a = fabsf(_tiltDegX);
+  if (st == ITEM_ATTACHED) { if (a > 35.0f) st = ITEM_FALLING; }
+  else                     { if (a < 25.0f) st = ITEM_ATTACHED; }
+}
+
 // Forward decl — buildRotation body lives in the 3D pipeline section.
 static void buildRotation(float yaw, float pitch);
+static int _xProjOff = 0;   // #tilt-bobble proj-X (declared early)
 
 static void readTilt() {
   float ax = 0, ay = 0, az = 0;
   M5.Imu.getAccelData(&ax, &ay, &az);
+  _xProjOff = 0;   // #tilt-bobble re-sets this in idle each frame
+
   // Low-pass IIR smoothing — kills hand-tremor jitter while staying
   // responsive (~100 ms time constant at 5 fps).
   static float axS = 0, ayS = 0;
@@ -61,6 +81,13 @@ static void readTilt() {
   _tiltX = _clamp(axS *  8.0f, -8, 8);
   _tiltY = _clamp(ayS *  8.0f, -8, 8);
   _gravX = _clamp(axS *  3.0f, -3, 3);
+  // Degree tilt (linear g·90; |deg|≤90).
+  float gx = axS; if (gx >  1.0f) gx =  1.0f; if (gx < -1.0f) gx = -1.0f;
+  float gy = ayS; if (gy >  1.0f) gy =  1.0f; if (gy < -1.0f) gy = -1.0f;
+  _tiltDegX = gx * 90.0f;
+  _tiltDegY = gy * 90.0f;
+  updateItemDetach(_hatState);    // #tilt-gravity detach
+  updateItemDetach(_shadeState);
   // Build the actual 3D rotation matrix used by the cube renderer.
   // Yaw from ax (head turns left/right when device tilts side-to-side);
   // pitch from ay (head looks up/down when device pitches forward/back).
@@ -76,6 +103,17 @@ static void readTilt() {
 // pivot on the neck.
 static int faceOffX() { return _tiltX; }       // ±8 px lateral shift
 static int faceOffY() { return _tiltY / 2; }   // ±3 px vertical (forward/back lean)
+
+// #tilt-bobble — step the head spring (k=0.15, damp=0.85 per SPEC) into
+// _xProjOff so the head wobbles laterally vs the drawn body. `active` gates
+// the drive (idle, |tilt|>10°). Call AFTER chest.
+static void applyHeadBobble(bool active) {
+  float target = active ? (_tiltDegX * 0.12f) : 0.0f;
+  float force = (target - _headRotP) * 0.15f;
+  _headRotV = (_headRotV + force) * 0.85f;
+  _headRotP += _headRotV;
+  _xProjOff = (int)(_headRotP + (_headRotP >= 0 ? 0.5f : -0.5f));
+}
 
 // Canvas anchor — head center on screen. Constants need to be visible
 // to the 3D projection code below, so they're hoisted above the body
@@ -97,6 +135,7 @@ struct V2 { int x, y; };
 
 static float _rot[9];          // 3×3 rotation matrix
 static int   _yProjOff = 0;    // bob/jump offset applied at projection time
+// _xProjOff (#tilt-bobble lateral shift) is declared up in the tilt section.
 
 static void buildRotation(float yaw, float pitch) {
   float cy = cosf(yaw),   sy = sinf(yaw);
@@ -128,7 +167,7 @@ static V2 projectV(V3 v) {
   const int   ANCHOR_Y = peek ? 32 : HY;
   float z = v.z + CAM_DIST;
   if (z < 1.0f) z = 1.0f;
-  return { (int)(HX + v.x * FOCAL / z),
+  return { (int)(HX + _xProjOff + v.x * FOCAL / z),
            (int)(ANCHOR_Y + _yProjOff + v.y * FOCAL / z) };
 }
 
@@ -465,22 +504,30 @@ static void drawVisor3D(uint16_t color) {
   _t->drawLine(tr.x, tr.y, br.x, br.y, CHASSIS_SH);
   _t->drawLine(br.x, br.y, bl.x, bl.y, CHASSIS_SH);
   _t->drawLine(bl.x, bl.y, tl.x, tl.y, CHASSIS_SH);
-  // Bright "pupil" — sits at face center plus tilt parallax
-  V2 pup = onFace((float)_tiltX * 1.5f, -2);
+  // #tilt-pupil — both axes off the degree tilt. pupilX∈±6, pupilY∈±3.
+  float puX = _tiltDegX * 0.4f; if (puX >  6) puX =  6; if (puX < -6) puX = -6;
+  float puY = _tiltDegY * 0.2f; if (puY >  3) puY =  3; if (puY < -3) puY = -3;
+  V2 pup = onFace(puX, -2 + puY);
   int pw = pkS(3), ph = pkS(4); if (pw < 1) pw = 1; if (ph < 1) ph = 1;
   _t->fillRect(pup.x - pw / 2, pup.y - ph / 2, pw, ph, SPECULAR);
 }
 
-// 3D sunglasses — project lens centers onto the rotated face, draw
-// filled circles. The circles don't squash to ellipses (would require
-// projected-disc rendering), but their POSITIONS track the rotation.
+// 3D sunglasses — lens centers projected onto the rotated face (POSITIONS
+// track rotation; circles don't squash to ellipses).
 static void drawSunglasses3D() {
   if (evoStage() < 3) return;            // Stage 3 (Persona): shades on
   if (!frontFaceVisible()) return;
-  V2 lL = onFace(-12, -1);
-  V2 lR = onFace( 12, -1);
-  V2 bL = onFace(-4,  -1);
-  V2 bR = onFace( 4,  -1);
+  // #tilt-gravity detached: slide off down-side + drop (rot omitted).
+  float sx = 0, sy = 0;
+  if (_shadeState == ITEM_FALLING) {
+    float s = fabsf(_tiltDegX) - 35.0f; if (s > 25.0f) s = 25.0f;
+    sx = s * (_tiltDegX > 0 ? 1 : -1);
+    sy = fabsf(sx) * 0.6f;
+  }
+  V2 lL = onFace(-12 + sx, -1 + sy);
+  V2 lR = onFace( 12 + sx, -1 + sy);
+  V2 bL = onFace(-4  + sx, -1 + sy);
+  V2 bR = onFace( 4  + sx, -1 + sy);
   int lr = pkS(8); if (lr < 2) lr = 2;   // lens radius — scaled so shades fit the mini face
   // Lens fills
   _t->fillCircle(lL.x, lL.y, lr, INK);
@@ -494,8 +541,8 @@ static void drawSunglasses3D() {
   _t->drawLine(bL.x, bL.y, bR.x, bR.y, STEEL);
   _t->drawLine(bL.x, bL.y - 1, bR.x, bR.y - 1, STEEL);
   // Specular highlights
-  V2 hL = onFace(-15, -5);
-  V2 hR = onFace( 10, -5);
+  V2 hL = onFace(-15 + sx, -5 + sy);
+  V2 hR = onFace( 10 + sx, -5 + sy);
   _t->drawPixel(hL.x, hL.y, SPECULAR);
   _t->drawPixel(hL.x + 1, hL.y, SPECULAR);
   _t->drawPixel(hR.x, hR.y, SPECULAR);
@@ -1020,24 +1067,37 @@ static void drawSpeechBubble(const char* text, uint16_t textColor) {
   _t->print(text);
 }
 
-// Party hat — pointy triangle on top of head with stripes and a pom.
+// Party hat — pointy triangle, stripes, pom. #tilt-gravity FALLING → slide
+// down-side + apex lean (faked rotate).
 static void drawPartyHat() {
   int fx = faceOffX();
   int fy = faceOffY();
   int hx = pkX(HX + fx);
   int hy = pkY(HY - HH/2 + fy);       // head top = canvas y=32 = hat base
+  int slideX = 0, slideY = 0, apexLean = 0;   // #tilt-gravity detach offsets
+  if (_hatState == ITEM_FALLING) {
+    float a = fabsf(_tiltDegX) - 35.0f; if (a > 30.0f) a = 30.0f;
+    int s = (int)(a * (_tiltDegX > 0 ? 1 : -1));
+    slideX = pkS(s * 3 / 2);
+    slideY = -pkS(abs(s) * 2 / 5);             // pops up
+    apexLean = pkS((int)(_tiltDegX * 0.3f));   // tip leans
+    if (apexLean >  pkS(24)) apexLean =  pkS(24);
+    if (apexLean < -pkS(24)) apexLean = -pkS(24);
+  }
+  hx += slideX; hy += slideY;
   // Canvas: triangle 67,12 / 56,32 / 78,32 — base sits ON the head top, apex
   // 20 px up, half-width 11. Crimson fill, dark outline.
   int up = pkS(20), out = pkS(11);
-  _t->fillTriangle(hx, hy - up, hx - out, hy, hx + out, hy, CRIMSON);
-  _t->drawTriangle(hx, hy - up, hx - out, hy, hx + out, hy, INK);
+  int ax = hx + apexLean;
+  _t->fillTriangle(ax, hy - up, hx - out, hy, hx + out, hy, CRIMSON);
+  _t->drawTriangle(ax, hy - up, hx - out, hy, hx + out, hy, INK);
   // White stripes (canvas y=22 / y=28 → 10 / 4 px above the base)
-  _t->drawLine(hx - pkS(5), hy - pkS(10), hx + pkS(6), hy - pkS(10), SPECULAR);
-  _t->drawLine(hx - pkS(8), hy - pkS(4),  hx + pkS(9), hy - pkS(4),  SPECULAR);
-  // Yellow pom at the tip (canvas circle 67,11 r=3 #ffd60a)
+  _t->drawLine(hx - pkS(5) + apexLean/2, hy - pkS(10), hx + pkS(6) + apexLean/2, hy - pkS(10), SPECULAR);
+  _t->drawLine(hx - pkS(8) + apexLean/3, hy - pkS(4),  hx + pkS(9) + apexLean/3, hy - pkS(4),  SPECULAR);
+  // Yellow pom rides the leaned tip (canvas circle 67,11 r=3 #ffd60a)
   int pr = pkS(3); if (pr < 1) pr = 1;
-  _t->fillCircle(hx, hy - pkS(21), pr, 0xFEA1);   // #ffd60a
-  _t->drawPixel(hx - 1, hy - pkS(22), SPECULAR);
+  _t->fillCircle(ax, hy - pkS(21), pr, 0xFEA1);   // #ffd60a
+  _t->drawPixel(ax - 1, hy - pkS(22), SPECULAR);
 }
 
 // Nightcap — drooping cap that hangs to the right, white trim band, pom.
@@ -1126,6 +1186,82 @@ static void drawHeartCloud(uint32_t t) {
     if (y < 0) continue;
     drawHeart(pkX(x), pkY(y), HEART_RED);
   }
+}
+
+// ── Ride mode (#tilt-skate / #tilt-surf / #tilt-hover) ───────────────
+// Boards UNDER the bot (y≈132-150), geometry from gr0m.jsx, pivot (67,138).
+// Vertical-SHEAR about x=67 (y'=y+(x-67)*slope; affine rotate too costly).
+// Home-scale only. 0 none/1 skate/2 surf/3 hover.
+static uint8_t _rideMode = 0;
+static const int RIDE_PIVOT_X = 67;
+static int _rideSlope = 0;     // y shear = (x-67)*_rideSlope>>8
+
+// slope ≈ angle(rad)×256. factor = JSX rotate mult (skate .6, surf/hover .5).
+static inline void rideComputeSlope(float f) {
+  _rideSlope = (int)(_tiltDegX * f * 0.0174533f * 256.0f);
+}
+static inline int rideY(int x, int y) { return y + ((x - RIDE_PIVOT_X) * _rideSlope >> 8); }
+
+// #tilt-skate — brown deck, orange bolt, trucks, r3 wheels, shadow.
+static void drawSkateboard() {
+  rideComputeSlope(0.6f);
+  _t->fillEllipse(RIDE_PIVOT_X + (_rideSlope >> 4), 148, 32, 2, 0x10A2);
+  for (int i = 0; i < 70; i++) {              // sheared brown deck
+    int x = 32 + i, yt = rideY(x, 134);
+    _t->drawFastVLine(x, yt, 6, 0x59C4);
+    _t->drawPixel(x, yt, 0x7AC7);
+    _t->drawPixel(x, yt + 5, 0x18A1);
+  }
+  int by = rideY(63, 137);
+  _t->fillTriangle(64, by - 1, 61, by, 65, by, 0xFC63);
+  _t->fillTriangle(64, by + 1, 61, by, 65, by, 0xFC63);
+  _t->fillRect(40, rideY(43, 140), 6, 2, 0x8410);
+  _t->fillRect(88, rideY(91, 140), 6, 2, 0x8410);
+  for (int k = 0; k < 2; k++) {
+    int wx = k ? 92 : 42, wy = rideY(wx, 144);
+    _t->fillCircle(wx, wy, 3, 0xDEDB);
+    _t->drawCircle(wx, wy, 3, 0x2965);
+    _t->drawPixel(wx, wy, 0x8410);
+  }
+}
+
+// #tilt-surf — wave curl + pointy board + red stripe + fin.
+static void drawSurfboard() {
+  rideComputeSlope(0.5f);
+  for (int i = 0; i < 106; i++) {
+    int x = 14 + i, hump = 6 - (abs(x - 67) * 6) / 53;
+    int yt = rideY(x, 144 - hump);
+    _t->drawFastVLine(x, yt, 152 - yt, 0x1B59);
+    _t->drawPixel(x, yt, 0x5DBF);
+  }
+  _t->fillRect(32, rideY(34, 134), 4, 1, SPECULAR);
+  _t->fillRect(98, rideY(100, 134), 4, 1, SPECULAR);
+  int n = rideY(67, 134), e = rideY(106, 140), w = rideY(28, 140), s = rideY(67, 142);
+  _t->fillTriangle(28, w, 67, n, 106, e, SPECULAR);
+  _t->fillTriangle(28, w, 106, e, 67, s, SPECULAR);
+  _t->drawTriangle(28, w, 67, n, 106, e, 0x8410);
+  _t->drawLine(36, rideY(36, 140), 100, rideY(100, 140), 0xF8A1);
+  int fy = rideY(67, 142);
+  _t->fillTriangle(62, fy, 67, fy + 6, 72, fy, 0x8410);
+}
+
+// #tilt-hover (Stage-5 alt) — MINIMAL STUB for the cap (see report).
+static void drawHoverboard() {
+  rideComputeSlope(0.5f);
+  _t->fillEllipse(RIDE_PIVOT_X + (_rideSlope >> 4), 148, 28, 3, 0x32BF);
+  int lx = 36, rx = 98, ly = rideY(lx, 135), ry = rideY(rx, 135);
+  _t->fillTriangle(lx, ly, rx, ry, rx, ry + 4, 0x10A2);
+  _t->fillTriangle(lx, ly, lx, ly + 4, rx, ry + 4, 0x10A2);
+  _t->drawLine(lx, ly, rx, ry, VISOR_IDLE);
+  _t->fillEllipse(48, rideY(48, 142), 3, 1, VISOR_IDLE);
+  _t->fillEllipse(86, rideY(86, 142), 3, 1, VISOR_IDLE);
+}
+
+static void drawRide() {   // home-scale only
+  if (_rideMode == 0 || buddyScale() != 2) return;
+  if      (_rideMode == 1) drawSkateboard();
+  else if (_rideMode == 2) drawSurfboard();
+  else                     drawHoverboard();
 }
 
 // Optional chest LCD — replaces the bolt with a small green readout.
@@ -1894,6 +2030,7 @@ static void doIdle(uint32_t t) {
   _t = buddyTarget();
   readTilt();
   _yProjOff = 0;
+  drawRide();   // #tilt-skate/surf/hover board (drawn first, under the bot)
   drawShadow(0);
   // Pixel desk + coffee mug under the bot — only paints in landscape clock
   // mode (drawDesk() self-gates on the render surface), matching the canvas
@@ -1924,6 +2061,8 @@ static void doIdle(uint32_t t) {
   } else {
     drawBolt3D(VISOR_IDLE);
   }
+  // #tilt-bobble — head spring (idle, |tilt|>10°) → _xProjOff for the draws below.
+  applyHeadBobble(fabsf(_tiltDegX) > 10.0f);
   drawNeck3D();
   drawHead3D();
   drawVisor3D(VISOR_IDLE);
@@ -2071,6 +2210,10 @@ void gr0mRenderHumanCostume(TFT_eSPI* tgt, uint32_t t) {
   gr0m::_t = tgt;
   gr0m::humanCostumeScene(t);
 }
+
+// Ride-mode control for main.cpp's "ride" row (#tilt-skate/surf/hover).
+void gr0mCycleRide()   { gr0m::_rideMode = (gr0m::_rideMode + 1) % 4; }
+uint8_t gr0mRideMode() { return gr0m::_rideMode; }
 
 extern const Species GR0M_SPECIES = {
   "gr0m",

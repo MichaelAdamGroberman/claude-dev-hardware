@@ -184,6 +184,22 @@ inline uint8_t statsEnergyTier() {
   return (uint8_t)e;
 }
 
+// #tilt-nap — while face-down napping, energy refills at 5× the normal
+// drain rate (normal = 1 tier / 2h, so nap = 1 tier / 24min). `_napStartE`
+// captures the energy tier at nap-start; each tick we add the gain relative
+// to that fixed baseline (so re-calling per-loop is idempotent, not
+// cumulative). _lastNapEndMs is kept current so the derived drain in
+// statsEnergyTier() doesn't fight the refill. `napMs` = nap duration so far.
+static uint8_t _napStartE = 5;
+inline void statsNapBegin() { _napStartE = statsEnergyTier(); }
+inline void statsNapTick(uint32_t napMs) {
+  uint8_t gained = (uint8_t)(napMs / (24UL * 60UL * 1000UL));   // 5× = 24 min/tier
+  int16_t e = (int16_t)_napStartE + (int16_t)gained;
+  if (e > 5) e = 5;
+  _energyAtNap  = (uint8_t)e;
+  _lastNapEndMs = millis();   // freeze derived drain during the nap
+}
+
 inline uint8_t statsFedProgress() {
   return (uint8_t)((_stats.lifetimeTokens % TOKENS_PER_LEVEL) / (TOKENS_PER_LEVEL / 10));
 }
@@ -198,9 +214,11 @@ struct Settings {
   bool mic;      // clap-to-approve (mic sampling during permission prompts)
   bool hud;
   uint8_t clockRot;  // 0=auto 1=portrait 2=landscape
+  bool worldUp;  // #tilt-worldup — keep the head visually vertical by rotating
+                 // the LCD 90° when the device is held sideways
 };
 
-static Settings _settings = { true, true, false, true, false, true, 0 };
+static Settings _settings = { true, true, false, true, false, true, 0, false };
 
 inline void settingsLoad() {
   _prefs.begin("buddy", true);
@@ -212,6 +230,7 @@ inline void settingsLoad() {
   _settings.hud      = _prefs.getBool("s_hud", true);
   _settings.clockRot = _prefs.getUChar("s_crot", 0);
   if (_settings.clockRot > 2) _settings.clockRot = 0;
+  _settings.worldUp  = _prefs.getBool("s_wup", false);
   _prefs.end();
 }
 
@@ -224,6 +243,7 @@ inline void settingsSave() {
   _prefs.putBool("s_mic", _settings.mic);
   _prefs.putBool("s_hud", _settings.hud);
   _prefs.putUChar("s_crot", _settings.clockRot);
+  _prefs.putBool("s_wup", _settings.worldUp);
   _prefs.end();
 }
 
