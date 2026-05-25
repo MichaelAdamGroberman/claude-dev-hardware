@@ -216,13 +216,22 @@ def main() -> int:
 
     decision = reply.get("decision", "")
     if decision == "once":
-        print(json.dumps({"decision": "approve"}))
+        # Current Claude Code PreToolUse contract: hookSpecificOutput /
+        # permissionDecision. The old top-level {"decision":"approve"} is
+        # DEPRECATED and silently ignored on recent versions — which is why
+        # pressing A on the device registered but never auto-accepted the
+        # session's tool call.
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+        }}))
         return 0
     if decision == "deny":
-        print(json.dumps({
-            "decision": "block",
-            "reason": "denied on Hardware Buddy",
-        }))
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "denied on Hardware Buddy",
+        }}))
         return 0
     # timeout / disconnected / unknown → fall through to Claude's prompt.
     # The device is still showing the approval screen; clear it now so the

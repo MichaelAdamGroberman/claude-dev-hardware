@@ -90,6 +90,11 @@ class BuddyLink:
     def __init__(self) -> None:
         self.pending: dict[str, asyncio.Future[str]] = {}
         self._ack_waiters: dict[str, asyncio.Future] = {}  # ack-type -> future
+        # Serializes device prompts: the screen shows one at a time, so
+        # concurrent Claude sessions queue (FIFO on this lock) instead of
+        # overwriting each other's prompt (which left the loser to time out
+        # and fall back to the terminal/phone).
+        self._prompt_lock = asyncio.Lock()
         self._rx_buf = bytearray()
         self._owner = os.environ.get("BUDDY_OWNER", "CLI")
 
@@ -547,21 +552,39 @@ class BuddyLink:
             return "disconnected"
         pid = f"hook_{uuid.uuid4().hex[:10]}"
         fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
-        self.pending[pid] = fut
-        await self._send_json({
-            "total": 1, "running": 0, "waiting": 1, "msg": f"approve: {tool}",
-            "prompt": {"id": pid, "tool": tool, "hint": hint, "src": src},
-        })
-        log(f"-> device prompt {pid}: {tool} / {hint!r}")
+        displayed = False
+
+        async def _show_and_wait() -> str:
+            # Only one prompt owns the screen at a time. Concurrent sessions
+            # block here (FIFO) and take the device in turn instead of
+            # clobbering each other. The id stays unique so the device's
+            # decision routes back to the right waiter via self.pending.
+            nonlocal displayed
+            async with self._prompt_lock:
+                self.pending[pid] = fut
+                await self._send_json({
+                    "total": 1, "running": 0, "waiting": 1, "msg": f"approve: {tool}",
+                    "prompt": {"id": pid, "tool": tool, "hint": hint, "src": src},
+                })
+                displayed = True
+                log(f"-> device prompt {pid}: {tool} / {hint!r}")
+                return await fut
+
         try:
-            decision = await asyncio.wait_for(fut, timeout=timeout_s)
+            # The timeout covers BOTH queue wait and on-screen wait, so a prompt
+            # stuck behind a long one still returns before the hook's socket
+            # read gives up (which keeps the calling session unblocked).
+            decision = await asyncio.wait_for(_show_and_wait(), timeout=timeout_s)
         except asyncio.TimeoutError:
             self.pending.pop(pid, None)
-            await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
-            # Device is still showing the stale prompt; clear it proactively so
-            # the hook caller doesn't have to race to do it.
-            await self._send_json({"cmd": "clearprompt"})
-            log(f"clearprompt sent after timeout for {pid}")
+            if displayed:
+                await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
+                # Device is still showing OUR stale prompt; clear it so the next
+                # queued prompt (or idle face) takes over.
+                await self._send_json({"cmd": "clearprompt"})
+                log(f"clearprompt sent after timeout for {pid}")
+            else:
+                log(f"prompt {pid} timed out in queue (never shown — screen busy)")
             return "timeout"
         # Record the decision in the approved/denied tally. The device replies
         # with "once"/"always" (approve) or "deny" — normalize before tallying.
