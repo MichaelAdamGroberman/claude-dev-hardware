@@ -588,10 +588,13 @@ void menuConfirm() {
   }
 }
 
+// Main menu — matched to drawSettings/drawConn/drawUsage so all the menus
+// share one look: 18-px header pill (size-1 label), 18-px size-1 rows, the
+// same 3-px orange left bar marking the selection, and the same footer strip.
 void drawMenu() {
   const Palette& p = characterPalette();
   const int mw = W - 8, mx = 4;
-  const int HEADER_H = 22, FOOTER_H = 16, ROW_H = 22;
+  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 18;
   const int mh = HEADER_H + MENU_N * ROW_H + FOOTER_H;
   const int my = (H - mh) / 2;
 
@@ -601,25 +604,23 @@ void drawMenu() {
 
   // Header pill — orange
   spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
-  spr.setTextSize(2);
+  spr.setTextSize(1);
   spr.setTextColor(p.bg, p.body);
-  spr.setCursor(mx + 6, my + 4);
+  spr.setCursor(mx + 6, my + 6);
   spr.print("MENU");
 
-  int rowsTop = my + HEADER_H + 2;
+  int rowsTop = my + HEADER_H + 3;
   for (int i = 0; i < MENU_N; i++) {
     bool sel = (i == menuSel);
     int ry = rowsTop + i * ROW_H;
-    if (sel) spr.fillRect(mx + 1, ry, 3, ROW_H - 2, p.body);
-    spr.setTextSize(2);
+    if (sel) spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
     spr.setCursor(mx + 8, ry + 4);
     spr.print(menuItems[i]);
     if (i == 4) {
       bool on = dataDemo();
-      spr.setTextSize(1);
       spr.setTextColor(on ? GREEN : p.textDim, PANEL);
-      spr.setCursor(mx + mw - 28, ry + 8);
+      spr.setCursor(mx + mw - 28, ry + 4);
       spr.print(on ? "on" : "off");
     }
   }
@@ -627,7 +628,6 @@ void drawMenu() {
   // Footer
   int fy = my + mh - FOOTER_H;
   spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextSize(1);
   spr.setTextColor(p.textDim, PANEL);
   spr.setCursor(mx + 6, fy + 4);
   spr.print("A Next   B Select");
@@ -825,6 +825,25 @@ static void sendDeny() {
   responseSent = true;
   statsOnDenial();
   beep(600, 60);
+}
+
+// Dismiss the currently-shown approval prompt without sending a decision.
+// Used by the {"cmd":"clearprompt"} bridge command (see xfer.h) to clear a
+// stale device prompt that was already resolved on the computer. Clears all
+// prompt state in `tama` plus the file-scope arrival bookkeeping so the
+// arrival detector in loop() doesn't immediately re-fire, and invalidates the
+// character so the normal screen redraws. Lives here (rather than xfer.h)
+// because the prompt state — `tama` (TamaState), `lastPromptId`,
+// `responseSent` — is all defined in this translation unit.
+void clearPromptState() {
+  tama.promptId[0]   = 0;
+  tama.promptTool[0] = 0;
+  tama.promptHint[0] = 0;
+  tama.promptSrc[0]  = 0;
+  lastPromptId[0]    = 0;   // keep arrival detector in sync (matches "" now)
+  responseSent       = false;
+  characterInvalidate();
+  if (buddyMode) buddyInvalidate();
 }
 
 bool checkShake() {
@@ -1803,6 +1822,12 @@ void loop() {
   t++;
   uint32_t now = millis();
 
+  // Read the serial/BLE command line FIRST, before any heavy work — the
+  // buddy/character tick and the bottom-of-loop 3D render are the slow parts,
+  // and an arriving permission prompt must not be stuck behind a slow frame.
+  // dataPoll() parses incoming JSON (including the prompt + clearprompt cmds)
+  // and the prompt-arrival block below draws the approval screen the same
+  // iteration, so latency is bounded by parse time, not a full render frame.
   dataPoll(&tama);
   if (statsPollLevelUp()) triggerOneShot(P_CELEBRATE, 3000);
   baseState = derive(tama);
@@ -1847,6 +1872,25 @@ void loop() {
       applyDisplayMode();
       characterInvalidate();
       if (buddyMode) buddyInvalidate();
+
+      // Draw the approval screen immediately, this same iteration, instead of
+      // waiting for the heavy 3D render at the bottom of the next loop. Compose
+      // the buddy/character into the sprite (attention mood), overlay the
+      // approval panel via drawHUD (which calls drawApproval while promptId is
+      // set), and push it to the LCD now. The normal render path below still
+      // runs every frame after this — this just removes the one-frame latency
+      // between a prompt arriving and the user seeing it.
+      if (!screenOff) {
+        activeState = P_ATTENTION;
+        if (buddyMode) {
+          buddyTick(activeState);
+        } else if (characterLoaded()) {
+          characterSetState(activeState);
+          characterTick();
+        }
+        drawHUD();
+        spr.pushSprite(0, 0);
+      }
     }
   }
 

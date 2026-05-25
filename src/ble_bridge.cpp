@@ -52,10 +52,27 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
 // is KeyboardOnly. The stack asks us for a passkey to show; we generate a
 // random 6-digit one and main.cpp polls blePasskey() to render it.
 class ServerCallbacks : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer*, NimBLEConnInfo& info) override {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& info) override {
     connected = true;
     connHandle = info.getConnHandle();
     Serial.println("[ble] connected");
+    // Request a tighter connection interval so prompt/ack round-trips don't
+    // wait out the central's default (often 30-50ms+). macOS may not honor
+    // it exactly, but it will negotiate down toward this window.
+    //   minInterval 12  -> 12 * 1.25ms = 15ms
+    //   maxInterval 24  -> 24 * 1.25ms = 30ms
+    //   latency     0   -> no skipped connection events
+    //   timeout     400 -> 400 * 10ms  = 4000ms supervision timeout
+    const uint16_t kMinInterval = 12;
+    const uint16_t kMaxInterval = 24;
+    const uint16_t kLatency     = 0;
+    const uint16_t kTimeout     = 400;
+    if (pServer) {
+      pServer->updateConnParams(connHandle, kMinInterval, kMaxInterval,
+                                kLatency, kTimeout);
+      Serial.printf("[ble] req conn params min=%u max=%u lat=%u to=%u\n",
+                    kMinInterval, kMaxInterval, kLatency, kTimeout);
+    }
   }
   void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason) override {
     connected = false;

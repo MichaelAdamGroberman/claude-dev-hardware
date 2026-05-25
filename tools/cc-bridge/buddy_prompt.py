@@ -35,6 +35,28 @@ SOCK_PATH = Path.home() / ".cache" / "claude-buddy" / "buddy.sock"
 DEFAULT_TIMEOUT_S = 30
 
 
+def _clearprompt_device() -> None:
+    """Best-effort: tell the daemon to clear the stale approval prompt from
+    the device screen.  Silently swallows all errors so call sites stay clean."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2)
+        s.connect(str(SOCK_PATH))
+        try:
+            s.sendall((json.dumps({"op": "clearprompt"}) + "\n").encode("utf-8"))
+            # Read and discard the {"ok":true} reply so the daemon can flush.
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(256)
+                if not chunk:
+                    break
+                buf += chunk
+        finally:
+            s.close()
+    except Exception:
+        pass
+
+
 def _allow_rules(cwd: str):
     """permissions.allow entries from user + project settings (best-effort)."""
     rules = []
@@ -150,6 +172,9 @@ def main() -> int:
             buf += chunk
         reply = json.loads(buf.decode("utf-8").splitlines()[0])
     except Exception:
+        # The prompt was already sent to the device; clear it so the device
+        # doesn't leave a stale approval screen while Claude prompts on-screen.
+        _clearprompt_device()
         return 0
     finally:
         sock.close()
@@ -164,7 +189,10 @@ def main() -> int:
             "reason": "denied on Hardware Buddy",
         }))
         return 0
-    # timeout / disconnected / unknown → fall through to Claude's prompt
+    # timeout / disconnected / unknown → fall through to Claude's prompt.
+    # The device is still showing the approval screen; clear it now so the
+    # device doesn't display a stale prompt while the computer handles it.
+    _clearprompt_device()
     return 0
 
 

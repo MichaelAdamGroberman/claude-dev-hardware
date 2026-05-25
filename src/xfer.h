@@ -231,6 +231,20 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  // Dismiss the approval prompt currently shown on the device. The bridge
+  // sends this when the prompt was already resolved on the computer (or
+  // expired), so the stick shouldn't keep showing a stale APPROVE screen.
+  // The prompt state (tama / lastPromptId / responseSent) all lives in
+  // main.cpp; clearPromptState() there clears it and returns to the normal
+  // screen — declared extern here the same way `adapter` reaches adapterMode.
+  //   {"cmd":"clearprompt"}
+  if (strcmp(cmd, "clearprompt") == 0) {
+    extern void clearPromptState();
+    clearPromptState();
+    _xAck("clearprompt", true);
+    return true;
+  }
+
   // GPIO / mini logic-analyzer on the exposed header pins. Restricted to
   // pins that aren't wired to the display/IMU/buttons/IR/mic so we can't
   // brick the device. Replies with {"ack":"gpio",...} carrying the result.

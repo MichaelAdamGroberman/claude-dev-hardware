@@ -18,6 +18,7 @@ Unix socket ~/.cache/claude-buddy/buddy.sock, one JSON line per req/resp:
                                       periodTokens, lifetimeTokens, level,
                                       evoStage, approved, denied, period}
   {"op":"send","cmd":{...}}       -> forward a raw command to the device
+  {"op":"clearprompt"}            -> send {"cmd":"clearprompt"} to device; {"ok":true}
   {"op":"token","action":"reset"} -> zero the period counter + approved/denied
   {"op":"token","action":"period","value":"day|week|month|all"}
   {"op":"token","action":"level_reset"} -> zero the lifetime baseline
@@ -557,6 +558,10 @@ class BuddyLink:
         except asyncio.TimeoutError:
             self.pending.pop(pid, None)
             await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
+            # Device is still showing the stale prompt; clear it proactively so
+            # the hook caller doesn't have to race to do it.
+            await self._send_json({"cmd": "clearprompt"})
+            log(f"clearprompt sent after timeout for {pid}")
             return "timeout"
         # Record the decision in the approved/denied tally.
         if decision in ("approved", "denied"):
@@ -636,6 +641,12 @@ async def handle_client(link: BuddyLink, reader, writer) -> None:
             else:
                 r = {"error": "query needs cmd + ack"}
             writer.write((json.dumps(r) + "\n").encode())
+        elif op == "clearprompt":
+            # Dismiss a stale approval prompt on the device — used by the hook
+            # when it falls through to the computer instead of waiting for the
+            # device decision (timeout / disconnected / unknown).
+            await link._send_json({"cmd": "clearprompt"})
+            writer.write((json.dumps({"ok": True}) + "\n").encode())
         elif op == "token":
             action = req.get("action")
             if action == "reset":
