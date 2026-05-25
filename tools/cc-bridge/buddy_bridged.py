@@ -123,6 +123,7 @@ class BuddyLink:
         self._lifetime_cached: int = 0          # raw all-time total (from scan)
         self._lifetime_baseline: int = 0        # subtract for displayed value
         self._lifetime_scanned: bool = False    # True after the initial scan
+        self._lifetime_scan_mtime: float = 0.0  # newest transcript mtime at last scan
 
         # Approved/denied tally: list of {"ts": float, "decision": "approved"|"denied"}
         self._decision_log: list[dict] = []
@@ -133,7 +134,8 @@ class BuddyLink:
 
     def _load_state(self) -> None:
         try:
-            d = json.load(STATE_PATH.open())
+            with STATE_PATH.open() as _fh:
+                d = json.load(_fh)
             self._period = d.get("period", self._period)
             self._reset_ts = float(d.get("reset_ts", 0.0))
             self._lifetime_baseline = int(d.get("lifetime_baseline", 0))
@@ -153,10 +155,21 @@ class BuddyLink:
             pass
 
     def _scan_all_lifetime_tokens(self) -> int:
-        """Sum output_tokens across ALL JSONL transcripts (called once at startup)."""
+        """Sum output_tokens across ALL JSONL transcripts.
+
+        Updates self._lifetime_scan_mtime to the newest file mtime seen so
+        heartbeat_loop can skip redundant rescans when nothing has changed.
+        """
         total = 0
+        max_mtime = 0.0
         try:
             for p in PROJECTS_DIR.glob("*/*.jsonl"):
+                try:
+                    mtime = p.stat().st_mtime
+                    if mtime > max_mtime:
+                        max_mtime = mtime
+                except OSError:
+                    continue
                 try:
                     with p.open("r", errors="replace") as f:
                         for line in f:
@@ -172,7 +185,25 @@ class BuddyLink:
                     continue
         except Exception:
             pass
+        self._lifetime_scan_mtime = max_mtime
         return total
+
+    def _transcripts_changed(self) -> bool:
+        """Return True if any transcript has been modified since the last scan.
+
+        Uses a single stat pass over the glob (O(n) but no file I/O): ~2ms on
+        157 files.  Called from the heartbeat thread before the ~500ms full scan.
+        """
+        try:
+            for p in PROJECTS_DIR.glob("*/*.jsonl"):
+                try:
+                    if p.stat().st_mtime > self._lifetime_scan_mtime:
+                        return True
+                except OSError:
+                    continue
+        except Exception:
+            pass
+        return False
 
     def ensure_lifetime_scanned(self) -> None:
         """Scan all transcripts once at startup to seed the lifetime cache."""
@@ -403,7 +434,7 @@ class BuddyLink:
         (used for GPIO reads / captures that return data)."""
         if not self.is_connected():
             return {"error": "device not connected"}
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._ack_waiters[ack] = fut
         await self._send_json(cmd)
         try:
@@ -551,7 +582,7 @@ class BuddyLink:
         if not self.is_connected():
             return "disconnected"
         pid = f"hook_{uuid.uuid4().hex[:10]}"
-        fut: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         displayed = False
 
         async def _show_and_wait() -> str:
@@ -598,11 +629,16 @@ class BuddyLink:
         while True:
             await asyncio.sleep(HEARTBEAT_S)
             if self.is_connected() and not self.pending:
-                # Refresh lifetime LIVE each heartbeat — it was a one-time startup
-                # snapshot, which froze the device's level + FED bar during use.
-                # Off-thread so the (sync) transcript scan never blocks the loop.
+                # Refresh lifetime LIVE each heartbeat so the device's level bar
+                # stays current during active sessions.  Skip the ~500ms full scan
+                # when no transcript has been written since the last scan (mtime
+                # guard costs ~2ms).  Off-thread so the sync scan never blocks
+                # the event loop.
                 try:
-                    self._lifetime_cached = await asyncio.to_thread(self._scan_all_lifetime_tokens)
+                    changed = await asyncio.to_thread(self._transcripts_changed)
+                    if changed:
+                        self._lifetime_cached = await asyncio.to_thread(
+                            self._scan_all_lifetime_tokens)
                 except Exception as exc:
                     log(f"lifetime rescan failed: {exc}")
                 await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
@@ -740,7 +776,7 @@ async def main() -> None:
         for t in asyncio.all_tasks():
             t.cancel()
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _shutdown)
 
