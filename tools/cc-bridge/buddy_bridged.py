@@ -563,9 +563,12 @@ class BuddyLink:
             await self._send_json({"cmd": "clearprompt"})
             log(f"clearprompt sent after timeout for {pid}")
             return "timeout"
-        # Record the decision in the approved/denied tally.
-        if decision in ("approved", "denied"):
-            self._record_decision(decision)
+        # Record the decision in the approved/denied tally. The device replies
+        # with "once"/"always" (approve) or "deny" — normalize before tallying.
+        if decision in ("once", "always", "approve", "approved"):
+            self._record_decision("approved")
+        elif decision in ("deny", "denied", "block"):
+            self._record_decision("denied")
         return decision
 
     async def heartbeat_loop(self) -> None:

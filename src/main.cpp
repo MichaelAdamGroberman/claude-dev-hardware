@@ -966,9 +966,11 @@ void drawInfo() {
   } else if (infoPage == 2) {
     _infoHeader(p, y, "CLAUDE", infoPage);
     spr.setTextColor(p.textDim, p.bg);
-    ln("  sessions  %u", tama.sessionsTotal);
-    ln("  running   %u", tama.sessionsRunning);
-    ln("  waiting   %u", tama.sessionsWaiting);
+    // The bridge is a prompt gateway, not session-aware, so it can't report
+    // live Claude session counts (they were always 0). Show what it DOES track
+    // accurately and pushes every heartbeat: approvals/denials this period.
+    ln("  approved  %u", stats().okCount);
+    ln("  denied    %u", stats().noCount);
     y += 8;
     spr.setTextColor(p.text, p.bg);
     ln("LINK");
