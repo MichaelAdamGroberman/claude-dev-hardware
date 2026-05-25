@@ -1205,8 +1205,11 @@ void drawPet() {
   // would wrap to a second line at size 2, so fall back to size 1
   // (6 px/char, ~21 chars fit) before that happens.
   char title[40];
-  if (ownerName()[0]) {
-    snprintf(title, sizeof(title), "%s's %s", ownerName(), petName());
+  const char* owner = ownerName();
+  // If the owner name matches the pet's name (e.g. owner "gr0m" + the gr0m
+  // species), skip the redundant "gr0m's gr0m" and just show the name.
+  if (owner[0] && strcasecmp(owner, petName()) != 0) {
+    snprintf(title, sizeof(title), "%s's %s", owner, petName());
   } else {
     snprintf(title, sizeof(title), "%s", petName());
   }
