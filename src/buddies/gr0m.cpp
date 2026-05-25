@@ -135,6 +135,29 @@ static V2 projectV(V3 v) {
 // Rotate + project in one call — common pattern.
 static V2 rp(V3 v) { return projectV(rotateV(v)); }
 
+// ── Peek (mini) coordinate mapping ───────────────────────────────────
+// The 2D accessory/particle/costume helpers below are authored in the
+// HOME layout (head center HX,HY; full-size pixel offsets). In peek mode
+// the body is re-projected smaller and higher (see projectV: anchor
+// y=32, focal 50 vs HY/97), but these helpers historically didn't get
+// that transform, so they were gated off and the mini lost its mood and
+// evolution gear. These map a HOME screen coordinate / length onto the
+// peek body so hats, costumes, mood particles and the chest HUD ride the
+// shrunk character (and stay above the y=70 stats panel) instead of
+// overflowing it. At home scale (2) they are the identity, so the home
+// screen renders byte-for-byte as before.
+static const float PEEK_K = 50.0f / 97.0f;   // focal ratio, matches projectV()
+static const int   PEEK_ANCHOR_Y = 32;       // peek head-center y, matches projectV()
+static inline int pkX(int xh) {
+  return (buddyScale() == 1) ? HX + (int)((xh - HX) * PEEK_K) : xh;
+}
+static inline int pkY(int yh) {
+  return (buddyScale() == 1) ? PEEK_ANCHOR_Y + (int)((yh - HY) * PEEK_K) : yh;
+}
+static inline int pkS(int len) {              // scale a length / radius
+  return (buddyScale() == 1) ? (int)(len * PEEK_K + 0.5f) : len;
+}
+
 // ════════════════════════════════════════════════════════════════════
 //   gr0m — vector ROBOT mascot
 // ────────────────────────────────────────────────────────────────────
@@ -207,13 +230,12 @@ static void drawLeaf(int x, int y, uint16_t c) {
 // Soft drop shadow beneath the robot — offset by tilt so it tracks the
 // "light source" direction, giving a fake-3D "lifted off screen" feel.
 static void drawShadow(int yOff) {
-  if (buddyScale() == 1) return;   // 2D helpers use home HX/HY — skip in peek
-  int sx = HX + _tiltX * 2;
-  int sy = HY + 60 + yOff;
+  int sx = pkX(HX + _tiltX * 2);
+  int sy = pkY(HY + 60 + yOff);
   // 3-ring soft shadow, darkest at center
-  _t->fillEllipse(sx, sy + 2, 26, 3, 0x10A2);
-  _t->fillEllipse(sx, sy + 1, 22, 2, 0x20C3);
-  _t->fillEllipse(sx, sy,     18, 2, 0x2965);
+  _t->fillEllipse(sx, sy + pkS(2), pkS(26), pkS(3), 0x10A2);
+  _t->fillEllipse(sx, sy + pkS(1), pkS(22), pkS(2), 0x20C3);
+  _t->fillEllipse(sx, sy,          pkS(18), pkS(2), 0x2965);
 }
 
 // Antenna with LED bulb. ledColor=0 means LED off (dark).
@@ -396,13 +418,14 @@ static void drawAntenna3D(uint16_t ledColor) {
   V3 tip  = { 0, -36, 0 };
   drawPole3D(base, tip, CHASSIS_SH);
   V2 p = rp(tip);
+  int lr = pkS(3); if (lr < 1) lr = 1;   // LED radius — scaled to the mini antenna
   if (ledColor) {
-    _t->fillCircle(p.x, p.y, 3, ledColor);
-    _t->drawCircle(p.x, p.y, 3, SPECULAR);
-    _t->drawCircle(p.x, p.y, 4, (ledColor >> 2) & 0x39E7);  // halo
+    _t->fillCircle(p.x, p.y, lr, ledColor);
+    _t->drawCircle(p.x, p.y, lr, SPECULAR);
+    _t->drawCircle(p.x, p.y, lr + 1, (ledColor >> 2) & 0x39E7);  // halo
     _t->drawPixel(p.x - 1, p.y - 1, SPECULAR);
   } else {
-    _t->drawCircle(p.x, p.y, 3, CHASSIS_SH);
+    _t->drawCircle(p.x, p.y, lr, CHASSIS_SH);
   }
 }
 
@@ -454,7 +477,8 @@ static void drawVisor3D(uint16_t color) {
   _t->drawLine(bl.x, bl.y, tl.x, tl.y, CHASSIS_SH);
   // Bright "pupil" — sits at face center plus tilt parallax
   V2 pup = onFace((float)_tiltX * 1.5f, -2);
-  _t->fillRect(pup.x - 1, pup.y - 2, 3, 4, SPECULAR);
+  int pw = pkS(3), ph = pkS(4); if (pw < 1) pw = 1; if (ph < 1) ph = 1;
+  _t->fillRect(pup.x - pw / 2, pup.y - ph / 2, pw, ph, SPECULAR);
 }
 
 // 3D sunglasses — project lens centers onto the rotated face, draw
@@ -467,14 +491,15 @@ static void drawSunglasses3D() {
   V2 lR = onFace( 12, -1);
   V2 bL = onFace(-4,  -1);
   V2 bR = onFace( 4,  -1);
+  int lr = pkS(8); if (lr < 2) lr = 2;   // lens radius — scaled so shades fit the mini face
   // Lens fills
-  _t->fillCircle(lL.x, lL.y, 8, INK);
-  _t->fillCircle(lR.x, lR.y, 8, INK);
+  _t->fillCircle(lL.x, lL.y, lr, INK);
+  _t->fillCircle(lR.x, lR.y, lr, INK);
   // Frames
-  _t->drawCircle(lL.x, lL.y, 8, STEEL);
-  _t->drawCircle(lL.x, lL.y, 9, STEEL);
-  _t->drawCircle(lR.x, lR.y, 8, STEEL);
-  _t->drawCircle(lR.x, lR.y, 9, STEEL);
+  _t->drawCircle(lL.x, lL.y, lr, STEEL);
+  _t->drawCircle(lL.x, lL.y, lr + 1, STEEL);
+  _t->drawCircle(lR.x, lR.y, lr, STEEL);
+  _t->drawCircle(lR.x, lR.y, lr + 1, STEEL);
   // Nose bridge — projected line between lens edges
   _t->drawLine(bL.x, bL.y, bR.x, bR.y, STEEL);
   _t->drawLine(bL.x, bL.y - 1, bR.x, bR.y - 1, STEEL);
@@ -512,10 +537,12 @@ static void drawMouth3D(int mood) {
       }
       break;
     }
-    case 4:  // O shouting
-      _t->fillCircle(mC.x, mC.y + 1, 4, INK);
-      _t->drawCircle(mC.x, mC.y + 1, 4, CHASSIS_SH);
+    case 4: {  // O shouting
+      int mr = pkS(4); if (mr < 1) mr = 1;
+      _t->fillCircle(mC.x, mC.y + 1, mr, INK);
+      _t->drawCircle(mC.x, mC.y + 1, mr, CHASSIS_SH);
       break;
+    }
     case 6: {  // X
       V2 a = onFace(-4, 12); V2 b = onFace( 4, 16);
       V2 c = onFace(-4, 16); V2 d = onFace( 4, 12);
@@ -816,7 +843,6 @@ static void drawJointInMouth(uint32_t t, bool lit, int yOff) {
 // at the actual ember position.
 static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
   if (evoStage() < 3) return;            // Stage 3 (Persona): smoke
-  if (buddyScale() == 1) return;
   if (intensity <= 0) return;
   int fx = faceOffX();
   int fy = faceOffY();
@@ -839,7 +865,7 @@ static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
     uint16_t color = (phase < 6) ? 0xF79E
                    : (phase < 16) ? STEEL
                                   : 0x39E7;
-    _t->fillCircle(x, y, r, color);
+    _t->fillCircle(pkX(x), pkY(y), r, color);
   }
 }
 
@@ -847,13 +873,12 @@ static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
 
 // Glasses tumbling in upper-left, cycles through 4 orientation poses
 static void drawDiscardedGlasses(uint32_t t) {
-  if (buddyScale() == 1) return;
   // Static base position with small arc bob
   static const int8_t BOB_X[4] = { 0, 2, 4, 2 };
   static const int8_t BOB_Y[4] = { 0, -2, 0, 2 };
   uint8_t pose = (t / 3) % 4;
-  int x = 16 + BOB_X[pose];
-  int y = 18 + BOB_Y[pose];
+  int x = pkX(16 + BOB_X[pose]);
+  int y = pkY(18 + BOB_Y[pose]);
   // Draw glasses in one of 4 orientations
   switch (pose) {
     case 0:  // horizontal
@@ -894,12 +919,11 @@ static void drawDiscardedGlasses(uint32_t t) {
 
 // Joint tumbling in upper-right with trailing smoke
 static void drawDiscardedJoint(uint32_t t) {
-  if (buddyScale() == 1) return;
   static const int8_t BOB_X[4] = { 0, -2, -4, -2 };
   static const int8_t BOB_Y[4] = { 0, -3, 0, 3 };
   uint8_t pose = (t / 3) % 4;
-  int x = 115 + BOB_X[pose];
-  int y = 16 + BOB_Y[pose];
+  int x = pkX(115 + BOB_X[pose]);
+  int y = pkY(16 + BOB_Y[pose]);
   // Joint at 4 orientations
   switch (pose) {
     case 0:  // horizontal, ember-right
@@ -946,7 +970,6 @@ static void drawDiscardedJoint(uint32_t t) {
 // at the half-life of their flight.
 static void drawMoodParticles(uint32_t t, int n, int speed) {
   if (evoStage() < 4) return;            // Stage 4 (HUD): mood particles
-  if (buddyScale() == 1) return;
   const int LIFECYCLE = 28;
   const int MORPH = LIFECYCLE / 2;
   int baseX = -32;
@@ -960,9 +983,9 @@ static void drawMoodParticles(uint32_t t, int n, int speed) {
     // axis as the smoke, so they all feel like a coherent atmosphere.
     x += (-_gravX * phase) / 8;
     if (phase < MORPH) {
-      drawHeart(x, y, HEART_RED);
+      drawHeart(pkX(x), pkY(y), HEART_RED);
     } else {
-      drawLeaf(x, y, LEAF_GREEN);
+      drawLeaf(pkX(x), pkY(y), LEAF_GREEN);
     }
   }
 }
@@ -1002,65 +1025,65 @@ static void drawHeadphones() {
 // Two stubby grey circles either side of the laptop, with thin arms back
 // to the chest body.
 static void drawHandsAtLaptop() {
-  int cx = HX;
-  int hy = HY + 38;
+  int cx = pkX(HX);
+  int hy = pkY(HY + 38);
+  int ay = pkY(HY + 30);
+  int hr = pkS(3); if (hr < 1) hr = 1;
   // Arms (thin chassis-color stubs)
-  _t->drawLine(cx - 20, HY + 30, cx - 14, hy - 2, CHASSIS_SH);
-  _t->drawLine(cx - 19, HY + 30, cx - 13, hy - 2, CHASSIS_SH);
-  _t->drawLine(cx + 20, HY + 30, cx + 14, hy - 2, CHASSIS_SH);
-  _t->drawLine(cx + 19, HY + 30, cx + 13, hy - 2, CHASSIS_SH);
+  _t->drawLine(cx - pkS(20), ay, cx - pkS(14), hy - pkS(2), CHASSIS_SH);
+  _t->drawLine(cx - pkS(19), ay, cx - pkS(13), hy - pkS(2), CHASSIS_SH);
+  _t->drawLine(cx + pkS(20), ay, cx + pkS(14), hy - pkS(2), CHASSIS_SH);
+  _t->drawLine(cx + pkS(19), ay, cx + pkS(13), hy - pkS(2), CHASSIS_SH);
   // Hands (circles)
-  _t->fillCircle(cx - 14, hy, 3, CHASSIS);
-  _t->drawCircle(cx - 14, hy, 3, CHASSIS_SH);
-  _t->drawPixel(cx - 15, hy - 1, CHASSIS_HI);
-  _t->fillCircle(cx + 14, hy, 3, CHASSIS);
-  _t->drawCircle(cx + 14, hy, 3, CHASSIS_SH);
-  _t->drawPixel(cx + 13, hy - 1, CHASSIS_HI);
+  _t->fillCircle(cx - pkS(14), hy, hr, CHASSIS);
+  _t->drawCircle(cx - pkS(14), hy, hr, CHASSIS_SH);
+  _t->drawPixel(cx - pkS(15), hy - 1, CHASSIS_HI);
+  _t->fillCircle(cx + pkS(14), hy, hr, CHASSIS);
+  _t->drawCircle(cx + pkS(14), hy, hr, CHASSIS_SH);
+  _t->drawPixel(cx + pkS(13), hy - 1, CHASSIS_HI);
 }
 
 // Tiny laptop sat in front of gr0m, glowing green screen with fake code.
 // Drawn between chest and bottom edge of screen so it reads as "on lap".
 static void drawLaptop(uint32_t t) {
-  if (buddyScale() == 1) return;
-  int cx = HX;
-  int kx = cx - 20, ky = HY + 36;  // keyboard base
-  int kw = 40, kh = 3;
+  int cx = pkX(HX);
+  int kx = cx - pkS(20), ky = pkY(HY + 36);  // keyboard base
+  int kw = pkS(40), kh = pkS(3); if (kh < 1) kh = 1;
   // Keyboard base + lip
   _t->fillRect(kx, ky, kw, kh, 0x3186);
   _t->drawFastHLine(kx, ky + kh, kw, INK);
   // Key hint dots
-  for (int i = 0; i < 8; i++) _t->drawPixel(kx + 3 + i * 5, ky + 1, 0x7BEF);
+  for (int i = 0; i < 8; i++) _t->drawPixel(kx + pkS(3 + i * 5), ky + 1, 0x7BEF);
   // Hinge
-  _t->drawFastHLine(kx + 2, ky - 1, kw - 4, 0x52AA);
+  _t->drawFastHLine(kx + pkS(2), ky - 1, kw - pkS(4), 0x52AA);
   // Screen bezel
-  int sx = kx + 4, sy = ky - 14;
-  int sw = kw - 8, sh = 13;
+  int sx = kx + pkS(4), sy = ky - pkS(14);
+  int sw = kw - pkS(8), sh = pkS(13); if (sh < 1) sh = 1;
   _t->fillRect(sx, sy, sw, sh, INK);
   _t->fillRect(sx + 1, sy + 1, sw - 2, sh - 2, 0x0660);
   // Fake code lines — light green pixels in a vague pattern
-  _t->drawFastHLine(sx + 2, sy + 2, 6, 0x07E0);
-  _t->drawFastHLine(sx + 9, sy + 2, 4, 0x07E0);
-  _t->drawFastHLine(sx + 2, sy + 4, 3, 0x07E0);
-  _t->drawFastHLine(sx + 6, sy + 4, 8, 0x07E0);
-  _t->drawFastHLine(sx + 2, sy + 6, 10, 0x07E0);
-  _t->drawFastHLine(sx + 13, sy + 6, 2, 0x07E0);
-  _t->drawFastHLine(sx + 2, sy + 8, 5, 0x07E0);
+  _t->drawFastHLine(sx + pkS(2),  sy + pkS(2), pkS(6),  0x07E0);
+  _t->drawFastHLine(sx + pkS(9),  sy + pkS(2), pkS(4),  0x07E0);
+  _t->drawFastHLine(sx + pkS(2),  sy + pkS(4), pkS(3),  0x07E0);
+  _t->drawFastHLine(sx + pkS(6),  sy + pkS(4), pkS(8),  0x07E0);
+  _t->drawFastHLine(sx + pkS(2),  sy + pkS(6), pkS(10), 0x07E0);
+  _t->drawFastHLine(sx + pkS(13), sy + pkS(6), pkS(2),  0x07E0);
+  _t->drawFastHLine(sx + pkS(2),  sy + pkS(8), pkS(5),  0x07E0);
   // Blinking cursor
-  if ((t / 2) & 1) _t->fillRect(sx + 14, sy + 8, 2, 1, SPECULAR);
+  if ((t / 2) & 1) _t->fillRect(sx + pkS(14), sy + pkS(8), 2, 1, SPECULAR);
 }
 
 // Speech bubble pointing at gr0m's head. White rounded rect with black
 // outline and a tail. Text rendered in `textColor`. Position auto-clamps
 // to keep the bubble inside the 135px-wide screen, even with long text.
 static void drawSpeechBubble(const char* text, uint16_t textColor) {
-  if (buddyScale() == 1) return;
   int len = 0; while (text[len]) len++;
   int w = len * 6 + 6;
   // Place to the upper-right of the head, but clamp so right edge ≤ 134.
-  int x = HX + 30;
+  int x = pkX(HX + 30);
   if (x + w > 134) x = 134 - w;
   if (x < 1) x = 1;
-  int y = HY - 28;
+  int y = pkY(HY - 28);
   if (y < 1) y = 1;
   // body
   _t->fillRoundRect(x, y, w, 12, 2, SPECULAR);
@@ -1078,58 +1101,61 @@ static void drawSpeechBubble(const char* text, uint16_t textColor) {
 
 // Party hat — pointy triangle on top of head with stripes and a pom.
 static void drawPartyHat() {
-  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
-  int hx = HX + fx;
-  int hy = HY - HH/2 + fy;
-  _t->fillTriangle(hx, hy - 18, hx - 10, hy - 2, hx + 10, hy - 2, CRIMSON);
-  _t->drawTriangle(hx, hy - 18, hx - 10, hy - 2, hx + 10, hy - 2, INK);
+  int hx = pkX(HX + fx);
+  int hy = pkY(HY - HH/2 + fy);
+  int up = pkS(18), out = pkS(10), lo = pkS(2);
+  _t->fillTriangle(hx, hy - up, hx - out, hy - lo, hx + out, hy - lo, CRIMSON);
+  _t->drawTriangle(hx, hy - up, hx - out, hy - lo, hx + out, hy - lo, INK);
   // Stripes
-  _t->drawLine(hx - 5, hy - 9, hx + 5, hy - 9, SPECULAR);
-  _t->drawLine(hx - 7, hy - 5, hx + 7, hy - 5, SPECULAR);
+  _t->drawLine(hx - pkS(5), hy - pkS(9), hx + pkS(5), hy - pkS(9), SPECULAR);
+  _t->drawLine(hx - pkS(7), hy - pkS(5), hx + pkS(7), hy - pkS(5), SPECULAR);
   // Pom pom
-  _t->fillCircle(hx, hy - 19, 2, 0xFFE0);
-  _t->drawPixel(hx, hy - 20, SPECULAR);
+  int pr = pkS(2); if (pr < 1) pr = 1;
+  _t->fillCircle(hx, hy - pkS(19), pr, 0xFFE0);
+  _t->drawPixel(hx, hy - pkS(20), SPECULAR);
 }
 
 // Nightcap — drooping cap that hangs to the right, white trim band, pom.
 static void drawNightcap() {
-  if (buddyScale() == 1) return;
   int fx = faceOffX();
   int fy = faceOffY();
-  int hx = HX + fx;
-  int hy = HY - HH/2 + fy;
+  int hx = pkX(HX + fx);
+  int hy = pkY(HY - HH/2 + fy);
+  int half = pkS(24), bandH = pkS(4); if (bandH < 1) bandH = 1;
   // White trim band wrapping the head top
-  _t->fillRect(hx - 24, hy - 1, 48, 4, SPECULAR);
-  _t->drawFastHLine(hx - 24, hy - 1, 48, 0xC638);
+  _t->fillRect(hx - half, hy - 1, half * 2, bandH, SPECULAR);
+  _t->drawFastHLine(hx - half, hy - 1, half * 2, 0xC638);
   // Drooping body — curves up and to the right
-  for (int i = 0; i < 18; i++) {
-    int y = hy - 3 - i;
-    int xLeft  = hx - 18 + i * 2;
-    int xRight = hx - 8 + i * 2;
+  int segs = (buddyScale() == 1) ? 9 : 18;
+  for (int i = 0; i < segs; i++) {
+    int y = hy - pkS(3) - i;
+    int xLeft  = hx - pkS(18) + pkS(i * 2);
+    int xRight = hx - pkS(8)  + pkS(i * 2);
     _t->drawFastHLine(xLeft, y, xRight - xLeft, VISOR_LOVE);
   }
   // Pom pom at the tip
-  int px = hx + 18, py = hy - 22;
-  _t->fillCircle(px, py, 3, SPECULAR);
+  int px = hx + pkS(18), py = hy - pkS(22);
+  int pr = pkS(3); if (pr < 1) pr = 1;
+  _t->fillCircle(px, py, pr, SPECULAR);
   _t->drawPixel(px - 1, py - 1, 0xC638);
 }
 
 // Z particles drifting up — used in sleep state.
 static void drawZParticles(uint32_t t) {
-  if (buddyScale() == 1) return;
+  bool peek = (buddyScale() == 1);
   _t->setTextColor(SPECULAR, BUDDY_BG);
   _t->setTextSize(1);
   int p1 = (int)(t * 2) % 30;
   if (p1 < 26) {
-    _t->setCursor(HX + 12, HY - 16 - p1);
+    _t->setCursor(pkX(HX + 12), pkY(HY - 16 - p1));
     _t->print("z");
   }
   int p2 = (int)((t + 5) * 2) % 30;
   if (p2 < 26) {
-    _t->setTextSize(2);
-    _t->setCursor(HX + 18, HY - 24 - p2);
+    if (!peek) _t->setTextSize(2);   // big "Z" stays size 1 in the mini strip
+    _t->setCursor(pkX(HX + 18), pkY(HY - 24 - p2));
     _t->print("Z");
     _t->setTextSize(1);
   }
@@ -1137,13 +1163,18 @@ static void drawZParticles(uint32_t t) {
 
 // Confetti rain — for celebrate.
 static void drawConfetti(uint32_t t) {
-  if (buddyScale() == 1) return;
+  // In peek the confetti still rains across the full 135-px width but is
+  // clamped to the upper strip (above the y=70 stats panel) with fewer
+  // pieces so it reads as celebration without crowding the card.
+  bool peek = (buddyScale() == 1);
+  int n = peek ? 7 : 14;
+  int maxY = peek ? 64 : 132;
   static const uint16_t CONF_COL[] = { HEART_RED, 0xFFE0, VISOR_IDLE, VISOR_BUSY, EMBER_HOT };
-  for (int i = 0; i < 14; i++) {
+  for (int i = 0; i < n; i++) {
     int phase = ((int)t * 2 + i * 11) % 40;
     int x = (i * 11 + (int)t * 3) % 135;
-    int y = phase * 4;
-    if (y < 0 || y > 132) continue;
+    int y = (phase * 4) % (maxY + 1);
+    if (y < 0 || y > maxY) continue;
     uint16_t c = CONF_COL[i % 5];
     if (i & 1) _t->fillRect(x, y, 2, 3, c);
     else       _t->fillCircle(x, y, 1, c);
@@ -1152,7 +1183,6 @@ static void drawConfetti(uint32_t t) {
 
 // Extra heart cloud — sparser but with bigger hearts. Heart state only.
 static void drawHeartCloud(uint32_t t) {
-  if (buddyScale() == 1) return;
   static const int8_t HPOS[][2] = {
     {18, 50}, {28, 28}, {10, 92}, {110, 38}, {118, 72}, {102, 100}
   };
@@ -1161,7 +1191,7 @@ static void drawHeartCloud(uint32_t t) {
     int y = HPOS[i][1] - phase;
     int x = HPOS[i][0] + ((i & 1) ? 1 : -1);
     if (y < 0) continue;
-    drawHeart(x, y, HEART_RED);
+    drawHeart(pkX(x), pkY(y), HEART_RED);
   }
 }
 
@@ -1170,13 +1200,18 @@ static void drawHeartCloud(uint32_t t) {
 // to fit in the 20×11 inset.
 static void drawChestLCD(const char* text) {
   if (evoStage() < 4) return;            // Stage 4 (HUD): chest readout
-  // Wide enough for a 4-char K/M figure ("729K", "12M") without clipping.
-  int lx = HX - 15, ly = HY + 30;
-  int lw = 30, lh = 11;
+  bool peek = (buddyScale() == 1);
+  // pk-mapped + scaled onto the shrunk chest. In peek the box becomes a
+  // small lit panel with NO text: a 4-char token figure is illegible at
+  // mini size and a native-width box dwarfs the body, so we show only the
+  // green HUD screen to match the Stage-4 silhouette.
+  int lx = pkX(HX - 15), ly = pkY(HY + 30);
+  int lw = pkS(30), lh = pkS(11);
   _t->fillRect(lx - 1, ly - 1, lw + 2, lh + 2, INK);
   _t->fillRect(lx, ly, lw, lh, 0x02E0);
   // 1px lit border
   _t->drawRect(lx, ly, lw, lh, 0x0660);
+  if (peek) return;                      // screen only — text won't fit the mini
   _t->setTextSize(1);
   _t->setTextColor(0x5FE0, 0x02E0);
   int textLen = 0; while (text[textLen]) textLen++;
