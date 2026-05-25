@@ -318,7 +318,7 @@ footer a:hover{text-decoration:underline}
 <section aria-labelledby="s1-title">
   <p class="section-label">① Hardware Buddy Window</p>
   <h2 class="section-title" id="s1-title">Claude Desktop Window — Redesigned</h2>
-  <p class="section-sub">Reframes the current pairing window as a real maker dashboard: live device mirror, in-window approval, activity stream, pet stats, character library, device tools.</p>
+  <p class="section-sub">Reframes the pairing window as a maker dashboard — live device mirror, in-window approval, activity stream, pet stats, character library, device tools. <strong>A proof-of-concept mockup, not a shipping feature.</strong></p>
 
   <div class="window-stage" role="region" aria-label="Hardware Buddy desktop window mockup">
     <div class="bw">
@@ -661,7 +661,7 @@ footer a:hover{text-decoration:underline}
 
 <footer>
   <p><a href="https://github.com/MichaelAdamGroberman/claude-dev-hardware" rel="noopener">claude-dev-hardware</a> · M5StickC Plus · gr0m · Claude Desktop Hardware Buddy</p>
-  <p style="margin-top:6px">Flash with <code>pio run -t upload</code> after dropping the firmware-patch files into src/</p>
+  <p style="margin-top:6px">Flash with <code>pio run -t upload</code> — see the README for the full fork + cc-bridge setup.</p>
 </footer>
 
 <!-- ════════════════════════════════════════════════════════════
@@ -1214,52 +1214,63 @@ function buildScreenApproval() {
   return root;
 }
 
-// Screen 4: PET
+// Screen 4: PET STATS — character peek up top, dark header strip ("owner's
+// pet" + page counter), then the redesigned stats card: LV pill, FED dots,
+// real battery bar (replaced the old "energy" tier), and a 2×2
+// APPROVED/DENIED/TOKENS/NAPPED grid. Mirrors the finalized firmware
+// drawPet/drawPetStats layout (header strip at y=70, content from y=88).
 function buildScreenPet() {
   const root=mkDiv('scr');
-  const hdr=mkDiv('scr-pet-hdr');
-  hdr.appendChild(gr0mPeekNode('heart',22));
-  const info=mkDiv(); info.style.flex='1';
-  const n=mkDiv(); n.style.cssText='font-size:11px;font-weight:700'; n.textContent='gr0m'; info.appendChild(n);
-  const s=mkDiv(); s.style.cssText='font-size:8px;color:#7a8492;margin-top:1px'; s.textContent="MICHAEL'S"; info.appendChild(s);
-  hdr.appendChild(info);
-  const pg=mkDiv(); pg.style.cssText='font-size:9px;color:#7a8492'; pg.textContent='1/2'; hdr.appendChild(pg);
-  root.appendChild(hdr);
 
-  const body=mkDiv('scr-pet-body');
+  // character peek — sits above the strip, like the Info screen
+  const pk=mkDiv('scr-info-pk'); pk.style.height='58px';
+  pk.appendChild(makeGr0m({mood:'heart',w:135,h:58,vb:'30 22 74 50',shadow:false,sj:false,sg:false}));
+  root.appendChild(pk);
+
+  // dark header strip — "owner's pet" + page counter
+  const bar=mkDiv('scr-info-b');
+  // Long "owner's pet" titles step down to the caption size on one line, the
+  // same rule the firmware drawPetHeader uses (>10 chars → FS_SUB) so the title
+  // never wraps out of the strip.
+  const bt=mkDiv(); bt.style.cssText='font-size:9px;font-weight:700;letter-spacing:.3px;color:#fff;white-space:nowrap'; bt.textContent="Michael's gr0m"; bar.appendChild(bt);
+  const bp=mkDiv(); bp.style.cssText='font-size:9px;color:#7a8492'; bp.textContent='1/3'; bar.appendChild(bp);
+  root.appendChild(bar);
+
+  const body=mkDiv('scr-pet-body'); body.style.paddingTop='6px';
+
+  // LV pill — DS orange with black text
   const lv=mkDiv('lv-chip');
-  const lvl=document.createElement('span'); lvl.className='lv-label'; lvl.textContent='LV ';
-  const lvn=document.createElement('span'); lvn.className='lv-num'; lvn.textContent='5';
-  lv.appendChild(lvl); lv.appendChild(lvn); body.appendChild(lv);
+  const lvl=mkSpan(); lvl.textContent='LV '; lv.appendChild(lvl);
+  const lvn=mkSpan(); lvn.style.fontSize='13px'; lvn.textContent='5'; lv.appendChild(lvn);
+  body.appendChild(lv);
 
-  function meterRow(label, val, max, color, isBar) {
-    const row=mkDiv(); row.style.cssText='margin-top:4px';
-    const top=mkDiv(); top.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:2px';
-    const tl=document.createElement('span'); tl.style.cssText='font-size:9px;color:#7a8492;letter-spacing:.5px'; tl.textContent=label;
-    const tv=document.createElement('span'); tv.style.cssText=`font-size:8px;color:${color}`; tv.textContent=`${val}/${max}`;
-    top.appendChild(tl); top.appendChild(tv); row.appendChild(top);
-    const track=mkDiv(); track.style.cssText='display:flex;gap:2px';
-    for(let i=0;i<max;i++){
-      const seg=document.createElement('span');
-      if (isBar) {
-        seg.className='mini-bar';
-        Object.assign(seg.style,{width:`${Math.floor(115/max)}px`,height:'7px',background:i<val?color:'transparent',border:i<val?'none':'1px solid #262a32'});
-      } else {
-        seg.className='mini-dot';
-        Object.assign(seg.style,{width:'5px',height:'5px',background:i<val?color:'transparent',border:i<val?'none':'1px solid #3a3f48'});
-      }
-      track.appendChild(seg);
-    }
-    row.appendChild(track);
-    return row;
-  }
-  body.appendChild(meterRow('FED',7,10,'#ff8c1a',false));
-  body.appendChild(meterRow('ENERGY',4,5,'#29d65b',true));
+  // FED meter — 10 dots
+  const fed=mkDiv(); fed.style.marginTop='5px';
+  const ft=mkDiv(); ft.style.cssText='display:flex;justify-content:space-between;align-items:baseline';
+  const fl=mkSpan(); fl.style.cssText='font-size:9px;color:#7a8492;letter-spacing:.5px'; fl.textContent='FED'; ft.appendChild(fl);
+  const fv=mkSpan(); fv.style.cssText='font-size:11px;font-weight:700;color:#ff8c1a'; fv.textContent='7/10'; ft.appendChild(fv);
+  fed.appendChild(ft);
+  const ftrack=mkDiv(); ftrack.style.cssText='display:flex;gap:2px;margin-top:3px';
+  for(let i=0;i<10;i++){ const d=mkDiv(); Object.assign(d.style,{flex:'1',maxWidth:'8px',height:'6px',borderRadius:'50%',background:i<7?'#ff8c1a':'transparent',border:i<7?'none':'1px solid #3a3f48'}); ftrack.appendChild(d); }
+  fed.appendChild(ftrack); body.appendChild(fed);
 
-  const divr=mkDiv(); divr.style.cssText='height:1px;background:#1a1c1e;margin:4px 0'; body.appendChild(divr);
-  const grid=mkDiv('s2x2');
+  // BATTERY — real battery bar (replaces the old "energy" tier)
+  const bat=mkDiv(); bat.style.marginTop='8px';
+  const btr=mkDiv(); btr.style.cssText='display:flex;justify-content:space-between;align-items:baseline';
+  const bl=mkSpan(); bl.style.cssText='font-size:9px;color:#7a8492;letter-spacing:.5px'; bl.textContent='BATTERY'; btr.appendChild(bl);
+  const bv=mkSpan(); bv.style.cssText='font-size:11px;font-weight:700;color:#29d65b'; bv.textContent='87%'; btr.appendChild(bv);
+  const bbg=mkSpan(); bbg.style.cssText='font-size:9px;font-weight:700;color:#00bdff'; bbg.textContent='USB'; btr.appendChild(bbg);
+  bat.appendChild(btr);
+  const bshell=mkDiv(); bshell.style.cssText='margin-top:3px;height:9px;border:1px solid #5a626c;border-radius:1px;padding:1px';
+  const bfill=mkDiv(); bfill.style.cssText='height:100%;width:87%;background:#29d65b;border-radius:1px'; bshell.appendChild(bfill);
+  bat.appendChild(bshell); body.appendChild(bat);
+
+  const divr=mkDiv(); divr.style.cssText='height:1px;background:#262a32;margin:8px 0 0'; body.appendChild(divr);
+
+  // 2×2 grid — APPROVED / DENIED / TOKENS / NAPPED
+  const grid=mkDiv('s2x2'); grid.style.marginTop='6px';
   [['APPROVED','42','#29d65b'],['DENIED','3','#ff6e5b'],['TOKENS','184K','#fff'],['NAPPED','2h14','#00bdff']].forEach(([l,v,c])=>{
-    const cell=mkDiv();
+    const cell=mkDiv(); cell.style.marginBottom='4px';
     const cl=mkDiv('s2x2-l'); cl.textContent=l; cell.appendChild(cl);
     const cv=mkDiv('s2x2-v'); cv.textContent=v; cv.style.color=c; cell.appendChild(cv);
     grid.appendChild(cell);
@@ -1296,7 +1307,7 @@ function buildScreenBluetooth() {
   const root=mkDiv('scr');
   const hdr=mkDiv('scr-hdr');
   const nm=mkDiv('scr-name'); nm.style.letterSpacing='1px'; nm.textContent='BLUETOOTH'; hdr.appendChild(nm);
-  const p=mkDiv(); p.style.cssText='font-size:9px;color:#7a8492'; p.textContent='5/6'; hdr.appendChild(p);
+  const p=mkDiv(); p.style.cssText='font-size:9px;color:#7a8492'; p.textContent='5/7'; hdr.appendChild(p);
   root.appendChild(hdr);
   const body=mkDiv('scr-bt-body');
   const linked=mkDiv(); linked.style.cssText='font-size:22px;font-weight:700;color:#29d65b'; linked.textContent='LINKED'; body.appendChild(linked);
@@ -1334,7 +1345,7 @@ function buildScreenInfo() {
   root.appendChild(pk);
   const bar=mkDiv('scr-info-b');
   const bt=mkDiv(); bt.style.cssText='font-size:12px;font-weight:700;letter-spacing:1px'; bt.textContent='ABOUT'; bar.appendChild(bt);
-  const bp=mkDiv(); bp.style.cssText='font-size:9px;color:#7a8492'; bp.textContent='1/6'; bar.appendChild(bp);
+  const bp=mkDiv(); bp.style.cssText='font-size:9px;color:#7a8492'; bp.textContent='1/7'; bar.appendChild(bp);
   root.appendChild(bar);
   const body=mkDiv('scr-body');
   const t1=mkDiv(); t1.style.cssText='font-size:13px;color:#fff;line-height:1.15'; t1.textContent='I watch your Claude sessions.'; body.appendChild(t1);
