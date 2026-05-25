@@ -77,11 +77,12 @@ def _period_start(period: str) -> float:
 
 
 def _evo_stage(lifetime: int) -> int:
-    """Map lifetime token count to evolution stage 0–5."""
-    for stage, milestone in enumerate(reversed(_EVO_MILESTONES), start=1):
+    """Map lifetime token count to evolution stage 0–5 (highest milestone crossed)."""
+    stage = 0
+    for s, milestone in enumerate(reversed(_EVO_MILESTONES), start=1):
         if lifetime >= milestone:
-            return stage
-    return 0
+            stage = s
+    return stage
 
 
 class BuddyLink:
