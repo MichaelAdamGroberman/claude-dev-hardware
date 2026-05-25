@@ -2048,7 +2048,7 @@ void loop() {
     bool flourish   = idle && (now % DJ_PERIOD_MS) < DJ_WINDOW_MS;
     djActive = stage5 && (celebrate || flourish);
   }
-  if (djActive) { djTick(now); return; }
+  if (djActive) { djTick(now); delay(16); return; }
 
   // A+B held together for 3s toggles the human-costume easter egg. Checked
   // every frame BEFORE the early-return below, so the same gesture also exits.
@@ -2067,7 +2067,7 @@ void loop() {
       abHeldSince = 0;
     }
   }
-  if (humanCostumeActive) { humanCostumeTick(now); return; }
+  if (humanCostumeActive) { humanCostumeTick(now); delay(16); return; }
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;

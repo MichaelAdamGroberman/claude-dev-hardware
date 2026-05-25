@@ -561,11 +561,13 @@ static void drawMouth3D(int mood) {
       _t->drawLine(c.x, c.y, d.x, d.y, CHASSIS_SH);
       break;
     }
-    case 7:  // bashful — small smile + blush
+    case 7: {  // bashful — small smile + blush
       _t->drawLine(mL.x + 4, mL.y, mR.x - 4, mR.y, CHASSIS_SH);
-      _t->fillCircle(onFace(-9, 16).x, onFace(-9, 16).y, 1, HEART_RED);
-      _t->fillCircle(onFace( 9, 16).x, onFace( 9, 16).y, 1, HEART_RED);
+      V2 blL = onFace(-9, 16), blR = onFace(9, 16);
+      _t->fillCircle(blL.x, blL.y, 1, HEART_RED);
+      _t->fillCircle(blR.x, blR.y, 1, HEART_RED);
       break;
+    }
     default:
       _t->drawLine(mL.x, mL.y, mR.x, mR.y, CHASSIS_SH);
   }
@@ -1957,7 +1959,12 @@ static void doIdle(uint32_t t) {
   // 14 frames bolt, 6 frames LCD — keeps the brand mark dominant but lets
   // the readout flicker into view occasionally so idle reads as "alive,
   // counting".
-  bool lcdFrame = ((t / 5) % 4) == 0;
+  // The LCD readout is a Stage-4 (HUD) feature — drawChestLCD() itself
+  // returns early below Stage 4. Only swap the bolt out for it once the
+  // stage actually renders the LCD, otherwise stages 2-3 would lose the
+  // brand bolt 1 frame in 4 (drawChestLCD draws nothing, leaving the
+  // chest blank on lcdFrame frames).
+  bool lcdFrame = evoStage() >= 4 && ((t / 5) % 4) == 0;
   if (lcdFrame) {
     // chest LCD swap — tokens with K/M shortening so it always fits 4 chars.
     // Source is stats().tokens (NVS-backed cumulative), not tama.tokens —
