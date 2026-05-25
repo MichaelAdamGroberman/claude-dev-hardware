@@ -423,8 +423,11 @@ static void drawNeck3D() {
 }
 
 // 3D antenna — pole rising from top of head with a glowing LED ball.
+// The antenna is PRESENT from Stage 0 (Core): the stalk + a dark, unlit LED
+// always draw. The LED only LIGHTS from Stage 2 (Powered) onward — below that
+// the requested ledColor is forced off so stages 0-1 show a bare antenna.
 static void drawAntenna3D(uint16_t ledColor) {
-  if (evoStage() < 2) return;            // Stage 2 (Powered): antenna up
+  if (evoStage() < 2) ledColor = 0;      // Stage 0-1 (Core/Frame): antenna present, LED dark
   V3 base = { 0, -22, 0 };
   V3 tip  = { 0, -36, 0 };
   drawPole3D(base, tip, CHASSIS_SH);
@@ -1880,8 +1883,8 @@ static void doSleep(uint32_t t) {
   drawVisor3D(VISOR_OFF);
   drawMouth3D(1);                   // closed flat
   drawAntenna3D(0);                 // LED off
-  if (evoStage() >= 5) {            // Stage 5 (Ascended): sleep costume
-    drawNightcap();                 // drooping sleep cap
+  if (evoStage() >= 4) {            // Stage 4 (HUD): sleep gear unlocks
+    drawNightcap();                 // drooping sleep cap (HUD gear)
     drawZParticles(t);              // Zzz drifting up
   }
   drawMoodParticles(t, 2, 4);
@@ -1944,15 +1947,20 @@ static void doBusy(uint32_t t) {
   drawVisor3D(VISOR_BUSY);
   drawMouth3D(3);                   // grimace
   drawAntenna3D(ledPulse ? VISOR_BUSY : 0);
-  // Stage 5 (Ascended): final form. The disguise headlines — the fedora
-  // takes the head slot that headphones used to hold (hat wins the conflict),
-  // but the work rig (laptop + typing hands) still reads underneath the coat
-  // since it doesn't fight the head gear.
-  if (evoStage() >= 5) {
+  // Stage 4 (HUD): the work rig unlocks — headphones on, laptop + typing
+  // hands in front. Below HUD the busy mood still renders, just bare.
+  if (evoStage() >= 4) {
     drawLaptop(t);
     drawHandsAtLaptop();
-    drawHumanDisguise(t);
+    // Headphones occupy the head slot the fedora claims at Stage 5, so only
+    // wear them at HUD (Stage 4); the disguise's hat wins the conflict above.
+    if (evoStage() < 5) drawHeadphones();  // full-scale only (early-returns at scale 1)
   }
+  // Stage 5 (Ascended): final form. The disguise headlines — the fedora
+  // takes the head slot the headphones held (hat wins the conflict), but the
+  // work rig (laptop + typing hands) still reads underneath the coat since it
+  // doesn't fight the head gear.
+  if (evoStage() >= 5) drawHumanDisguise(t);
   drawMoodParticles(t, 4, 1);
 }
 
@@ -1971,16 +1979,18 @@ static void doAttention(uint32_t t) {
   drawMouth3D(4);                     // O shout
   drawAntenna3D(pulse ? VISOR_ALERT : 0);
   // Stage 5 (Ascended): final form. Wear the coat/fedora/glasses but keep
-  // the alarm "!" as the attention tell so we don't stack two bubbles — the
-  // disguise's own "HELLO HUMAN" bubble would fight the alert here.
+  // the alarm "!" bubble (below) as the attention tell so we don't stack two
+  // bubbles — the disguise's own "HELLO HUMAN" bubble would fight the alert.
+  // drawHumanTell() (which carries that bubble) is intentionally skipped here.
   if (evoStage() >= 5) {
     drawTrenchcoat();
     drawFedora();
     drawHumanGlasses();
   }
   drawMoodParticles(t, 5, 1);
-  // NEW: pixel speech bubble — blinks on every other tick.
-  if (pulse && evoStage() >= 5) drawSpeechBubble("!", VISOR_ALERT);  // Stage 5
+  // Stage 4 (HUD): the alert speech bubble unlocks — blinks on alternate ticks.
+  // Below HUD the attention mood still renders (red visor + "!" mouth), bare.
+  if (pulse && evoStage() >= 4) drawSpeechBubble("!", VISOR_ALERT);
 }
 
 static void doCelebrate(uint32_t t) {
@@ -1998,7 +2008,7 @@ static void doCelebrate(uint32_t t) {
   drawSunglasses3D();
   drawMouth3D(2);                     // smile
   drawAntenna3D(RAINBOW[t % 6]);
-  if (evoStage() >= 5) {              // Stage 5 (Ascended): party costume
+  if (evoStage() >= 4) {              // Stage 4 (HUD): party gear unlocks
     drawPartyHat();                   // pointy hat with stripes + pom
     drawConfetti(t);                  // confetti rain across the screen
   }
@@ -2036,10 +2046,8 @@ static void doHeart(uint32_t t) {
   if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(((t / 8) & 1) ? 2 : 7);
   drawAntenna3D(((t / 3) & 1) ? HEART_RED : 0);
-  if (evoStage() >= 5) {            // Stage 5 (Ascended): final form + heart cloud
-    drawHeartCloud(t);
-    drawHumanDisguise(t);
-  }
+  if (evoStage() >= 4) drawHeartCloud(t);     // Stage 4 (HUD): heart-cloud gear
+  if (evoStage() >= 5) drawHumanDisguise(t);  // Stage 5 (Ascended): final form
   drawMoodParticles(t, 4, 2);
 }
 

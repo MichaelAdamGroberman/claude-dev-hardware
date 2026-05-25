@@ -48,8 +48,10 @@ PROJECTS_DIR = Path.home() / ".claude" / "projects"
 HEARTBEAT_S = 10
 DEFAULT_PROMPT_TIMEOUT_S = 30
 
-# Evolution stage milestones (lifetime tokens → stage)
-_EVO_MILESTONES = [1_250_000, 1_000_000, 750_000, 500_000, 250_000]  # a stage every ~5 levels (250K)
+# Evolution stage milestones (lifetime tokens → stage). Stages 1–4 every ~5
+# levels (250K); Stage 5 (Ascended) is a far-off endgame at 250M. Matches
+# deployment/evolution/SPEC.md and src/stats.h EVO_MILESTONES.
+_EVO_MILESTONES = [250_000_000, 1_000_000, 750_000, 500_000, 250_000]
 
 
 def log(msg: str) -> None:
