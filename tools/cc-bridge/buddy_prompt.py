@@ -44,6 +44,15 @@ def main() -> int:
 
     tool_name = payload.get("tool_name", "?")
     tool_input = payload.get("tool_input", {}) or {}
+
+    # In "accept edits" mode Claude auto-approves file edits, so there is no
+    # decision left to make — don't wake the device for them. Other modes,
+    # and non-edit tools (e.g. Bash) in any mode, still prompt as usual.
+    if payload.get("permission_mode") == "acceptEdits" and tool_name in (
+        "Edit", "Write", "MultiEdit", "NotebookEdit"
+    ):
+        return 0
+
     # Build a short hint string. Bash commands are the most important
     # case so prefer the command itself; otherwise pick a meaningful
     # input field if we recognize one.
