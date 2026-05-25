@@ -1356,8 +1356,10 @@ static void doSleep(uint32_t t) {
   drawVisor3D(VISOR_OFF);
   drawMouth3D(1);                   // closed flat
   drawAntenna3D(0);                 // LED off
-  drawNightcap();                   // NEW: drooping sleep cap
-  drawZParticles(t);                // NEW: Zzz drifting up
+  if (evoStage() >= 5) {            // Stage 5 (Ascended): sleep costume
+    drawNightcap();                 // drooping sleep cap
+    drawZParticles(t);              // Zzz drifting up
+  }
   drawMoodParticles(t, 2, 4);
 }
 
@@ -1412,9 +1414,11 @@ static void doBusy(uint32_t t) {
   // NEW: headphones on, sunglasses off, hands typing on laptop.
   // Discarded items remain as cameo in upper corners but smaller —
   // gr0m is fully focused now.
-  drawHeadphones();
-  drawLaptop(t);
-  drawHandsAtLaptop();
+  if (evoStage() >= 5) {            // Stage 5 (Ascended): work rig
+    drawHeadphones();
+    drawLaptop(t);
+    drawHandsAtLaptop();
+  }
   drawMoodParticles(t, 4, 1);
 }
 
@@ -1436,7 +1440,7 @@ static void doAttention(uint32_t t) {
   drawSmokeFromMouth(t, 1, 0);
   drawMoodParticles(t, 5, 1);
   // NEW: pixel speech bubble — blinks on every other tick.
-  if (pulse) drawSpeechBubble("!", VISOR_ALERT);
+  if (pulse && evoStage() >= 5) drawSpeechBubble("!", VISOR_ALERT);  // Stage 5
 }
 
 static void doCelebrate(uint32_t t) {
@@ -1456,8 +1460,10 @@ static void doCelebrate(uint32_t t) {
   drawJoint3D(t, true);
   drawAntenna3D(RAINBOW[t % 6]);
   drawSmokeFromMouth(t, 2, _yProjOff);
-  drawPartyHat();                     // NEW: pointy hat with stripes + pom
-  drawConfetti(t);                    // NEW: confetti rain across the screen
+  if (evoStage() >= 5) {              // Stage 5 (Ascended): party costume
+    drawPartyHat();                   // pointy hat with stripes + pom
+    drawConfetti(t);                  // confetti rain across the screen
+  }
   drawMoodParticles(t, 6, 1);
 }
 
@@ -1494,7 +1500,7 @@ static void doHeart(uint32_t t) {
   drawJoint3D(t, true);
   drawAntenna3D(((t / 3) & 1) ? HEART_RED : 0);
   drawSmokeFromMouth(t, 2, 0);
-  drawHeartCloud(t);                  // NEW: extra hearts floating
+  if (evoStage() >= 5) drawHeartCloud(t);   // Stage 5 (Ascended): heart cloud
   drawMoodParticles(t, 4, 2);
 }
 
