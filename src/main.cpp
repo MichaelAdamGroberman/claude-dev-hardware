@@ -109,11 +109,10 @@ enum DisplayMode { DISP_NORMAL, DISP_PET, DISP_INFO, DISP_COUNT };
 uint8_t displayMode = DISP_NORMAL;
 uint8_t infoPage = 0;
 uint8_t petPage = 0;
-// Pet pages: 0 = stats, 1 = how-to, 2 = evolution showcase. The showcase page
-// cycles the DISPLAYED evolution stage 0..5 so the character shows off every
-// upgrade it has unlocked (and previews what's still coming).
-const uint8_t PET_PAGES = 3;
-const uint8_t PET_PG_SHOWCASE = 2;
+// Pet pages: 0 = stats, 1 = how-to. Two pages total, matching the canvas
+// ScreenPet "1/2" page indicator. (An evolution-showcase 3rd page was reverted
+// out to match the design canvas.)
+const uint8_t PET_PAGES = 2;
 uint8_t msgScroll = 0;
 uint16_t lastLineGen = 0;
 char     lastPromptId[40] = "";
@@ -131,32 +130,12 @@ uint8_t  g_evoStage   = 0;   // = evoStage()
 uint32_t g_dispTokens = 0;   // = stats().tokens (period figure for the chest-LCD)
 bool     gifAvailable = false;
 
-// Evolution showcase: a non-destructive demo (Pet page PET_PG_SHOWCASE) that
-// walks the DISPLAYED stage 0..5 so the character shows off everything it has
-// unlocked and previews what's coming. It only OVERRIDES the g_evoStage mirror
-// that gr0m.cpp renders from; it never touches the persisted lifetimeTokens /
-// real evoStage(). The mirror is re-derived from evoStage() every loop (see the
-// "refresh the mirrors" line in loop()), so leaving the page restores truth for
-// free. SHOWCASE_HOLD_MS is the dwell per stage (~1.5s) before advancing.
-const uint32_t SHOWCASE_HOLD_MS = 1500;
-static uint32_t showcaseStartMs = 0;   // millis() when the showcase page was entered
 // Human-readable stage names, matching the gr0m.cpp render comments:
-//   0 Core, 1 Frame, 2 Powered, 3 Persona, 4 HUD, 5 Ascended.
+//   0 Core, 1 Frame, 2 Powered, 3 Persona, 4 HUD, 5 Ascended. Still used by the
+//   stage-up celebration overlay (drawStageUp).
 static const char* const EVO_STAGE_NAMES[6] = {
   "Core", "Frame", "Powered", "Persona", "HUD", "Ascended"
 };
-// Stage the showcase is currently displaying, derived purely from elapsed time
-// since the page was entered. Loops 0..5 → 0..5 forever.
-static inline uint8_t showcaseStage() {
-  uint32_t elapsed = millis() - showcaseStartMs;
-  return (uint8_t)((elapsed / SHOWCASE_HOLD_MS) % 6);
-}
-// True while the Pet showcase page owns the g_evoStage mirror. The caller in
-// loop() additionally requires no overlay menu to be open (those bools are
-// declared further down) before applying the override.
-static inline bool showcasePageActive() {
-  return displayMode == DISP_PET && petPage == PET_PG_SHOWCASE && !menuOpen;
-}
 const uint8_t SPECIES_GIF = 0xFF;   // species NVS sentinel: use the installed GIF
 
 // Cycle GIF (if installed) → ASCII species 0..N-1 → GIF. Persisted to the
@@ -1057,11 +1036,11 @@ static void _infoHeader(const Palette& p, int& y, const char* section, uint8_t p
 void drawPasskey() {
   spr.fillSprite(DS_BLACK);
 
-  // Header banner — blue, centered title (size 1, letter-spaced look).
+  // Header banner — blue, centered title (canvas: "BLUETOOTH PAIRING").
   spr.fillRect(0, 0, W, 18, DS_PASSHDR);
   spr.setTextSize(1);
   spr.setTextColor(DS_WHITE, DS_PASSHDR);
-  const char* hdr = "BT PAIRING";
+  const char* hdr = "BLUETOOTH PAIRING";
   spr.setCursor((W - (int)strlen(hdr) * 6) / 2, 5);
   spr.print(hdr);
 
@@ -1096,6 +1075,13 @@ void drawPasskey() {
   spr.setTextColor(DS_WHITE, DS_BLACK);
   spr.setCursor((W - (int)strlen(btName) * 12) / 2, 166);
   spr.print(btName);
+
+  // "waiting…" dim caption near the bottom (canvas y=210).
+  spr.setTextSize(1);
+  spr.setTextColor(DS_DIM, DS_BLACK);
+  const char* wl = "waiting...";
+  spr.setCursor((W - (int)strlen(wl) * 6) / 2, 210);
+  spr.print(wl);
 }
 
 void drawInfo() {
@@ -1217,14 +1203,13 @@ void drawInfo() {
     ln("  temp     %dC", (int)M5.Axp.GetTempInAXP192());
 
   } else if (infoPage == 4) {
-    // ScreenLinks — the live connection status page. Hero BT link state
-    // (LINKED / READY / SUSPEND / OFF) as the one big word, an ENCRYPTED status
-    // dot, the device name at BODY size (NOT a hero — it's too long to read big
-    // and it isn't the headline), then live WiFi (STA IP / AP clients) + VPN.
-    // EVERYTHING here is read at DRAW TIME each frame: drawInfo() re-runs every
-    // loop while DISP_INFO is active, so toggling a radio or (dis)connecting a
-    // peer is reflected immediately without any cached snapshot.
-    _infoHeader(p, y, "LINKS", infoPage);
+    // ScreenBluetooth — canvas BT status artboard: hero BT link WORD
+    // (LINKED / READY / SUSPEND / OFF), an ENCRYPTED status dot, then DEVICE /
+    // OWNER / LAST MSG key-value rows. The hero state is still read LIVE each
+    // frame (drawInfo re-runs every loop), so the BT link reflects the radio
+    // right now — the radio-mutex reads (bleSuspended / bleConnected / bleSecure)
+    // are preserved; only the WiFi/VPN sub-block was dropped to match the canvas.
+    _infoHeader(p, y, "BLUETOOTH", infoPage);
 
     bool suspended = bleSuspended();          // BLE suspended → WiFi owns radio
     bool connected = bleConnected();
@@ -1271,35 +1256,30 @@ void drawInfo() {
     spr.setTextColor(DS_WHITE, p.bg);
     spr.setCursor(4, y); spr.print(btName);
     y += 20;
-    // WiFi — live STA state read each frame. ONLINE shows the current IP; the
-    // setup-AP state shows the live count of associated stations.
-    NetWifiState ws = netWifiState();
-    if (ws != NW_OFF) {
-      uint16_t wc = (ws == NW_ONLINE) ? DS_GREEN : (ws == NW_FAILED) ? DS_RED : DS_AMBER;
-      const char* wl = (ws == NW_ONLINE) ? "online" : (ws == NW_PORTAL) ? "setup AP"
-                     : (ws == NW_FAILED) ? "failed" : "connecting";
-      spr.setTextSize(FS_SUB);
-      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("WIFI");
-      spr.setTextColor(wc, p.bg); spr.setCursor(40, y); spr.print(wl);
-      y += 10;
-      if (ws == NW_ONLINE) {
-        spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y);
-        spr.print(netWifiIP());
-        y += 10;
-      } else if (ws == NW_PORTAL) {
-        spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y);
-        spr.printf("clients: %d", netWifiApClients());
-        y += 10;
-      }
-    }
-    if (netWgState() != WG_OFF) {
-      NetWgState gs = netWgState();
-      uint16_t gc = gs == WG_UP ? DS_GREEN : gs == WG_FAILED ? DS_RED : DS_AMBER;
-      spr.setTextSize(FS_SUB);
-      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("VPN");
-      spr.setTextColor(gc, p.bg); spr.setCursor(40, y);
-      spr.print(gs == WG_UP ? "up" : gs == WG_FAILED ? "failed" : "...");
-      y += 10;
+    // OWNER — caption + name (canvas ScreenBluetooth). Falls back to a dash when
+    // no owner has been set by the desktop yet.
+    spr.setTextSize(FS_SUB);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y); spr.print("OWNER");
+    y += 10;
+    spr.setTextSize(FS_BODY);
+    spr.setTextColor(DS_WHITE, p.bg);
+    spr.setCursor(4, y); spr.print(ownerName()[0] ? ownerName() : "-");
+    y += 20;
+    // LAST MSG — caption + age (SPEC #bluetooth). Live age of the last update.
+    spr.setTextSize(FS_SUB);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y); spr.print("LAST MSG");
+    y += 10;
+    spr.setTextSize(FS_BODY);
+    spr.setTextColor(DS_WHITE, p.bg);
+    {
+      uint32_t age = tama.lastUpdated ? (millis() - tama.lastUpdated) / 1000 : 0;
+      char ab[12];
+      if (age < 60)        snprintf(ab, sizeof(ab), "%lus ago", (unsigned long)age);
+      else if (age < 3600) snprintf(ab, sizeof(ab), "%lum ago", (unsigned long)(age / 60));
+      else                 snprintf(ab, sizeof(ab), "%luh ago", (unsigned long)(age / 3600));
+      spr.setCursor(4, y); spr.print(ab);
     }
     // Hint: BtnA long-press opens the Connection submenu (gated in loop()).
     spr.setTextColor(DS_DIM, p.bg);
@@ -1346,13 +1326,26 @@ void drawInfo() {
     spr.setTextSize(1);
     spr.setTextColor(DS_DIM, p.bg);
     spr.setCursor(4, y); spr.print("EVOLUTION");
-    // milestone label, right-aligned
+    // milestone label, right-aligned. Canvas shows "→100M"; the GFX font lacks
+    // an arrow glyph so draw a small right-arrow before the value.
     char mb[10];
     if (nxt == 0)              snprintf(mb, sizeof(mb), "MAX");
-    else if (nxt >= 1000000UL) snprintf(mb, sizeof(mb), ">%luM", (unsigned long)(nxt / 1000000UL));
-    else                       snprintf(mb, sizeof(mb), ">%luK", (unsigned long)(nxt / 1000UL));
-    spr.setTextColor(DS_ORANGE, p.bg);
-    spr.setCursor(W - 4 - (int)strlen(mb) * 6, y); spr.print(mb);
+    else if (nxt >= 1000000UL) snprintf(mb, sizeof(mb), "%luM", (unsigned long)(nxt / 1000000UL));
+    else                       snprintf(mb, sizeof(mb), "%luK", (unsigned long)(nxt / 1000UL));
+    {
+      int mw  = (int)strlen(mb) * 6;
+      int arw = (nxt == 0) ? 0 : 7;     // arrow + 1px gap when a value is shown
+      int mx  = W - 4 - mw;
+      if (nxt != 0) {
+        int axx = mx - arw;
+        int ayy = y + 3;
+        spr.drawLine(axx, ayy, axx + 5, ayy, DS_ORANGE);       // shaft
+        spr.drawLine(axx + 5, ayy, axx + 2, ayy - 2, DS_ORANGE);// head up
+        spr.drawLine(axx + 5, ayy, axx + 2, ayy + 2, DS_ORANGE);// head down
+      }
+      spr.setTextColor(DS_ORANGE, p.bg);
+      spr.setCursor(mx, y); spr.print(mb);
+    }
     y += 11;
     spr.setTextSize(2);
     spr.setTextColor(DS_WHITE, p.bg);
@@ -1361,7 +1354,9 @@ void drawInfo() {
     spr.setTextColor(DS_DIM, p.bg);
     spr.setCursor(4 + 7 * 12 + 2, y + 8); spr.print("/5");
     y += 20;
-    // Progress bar — fraction of the way to the next milestone.
+    // Progress bar — fraction of the way to the next milestone. Canvas fills it
+    // with an ORANGE→YELLOW gradient, approximated here as an ORANGE base with a
+    // YELLOW tip segment so the bar reads as the canvas gradient.
     {
       uint32_t life = stats().lifetimeTokens;
       uint32_t prev = (stg == 0) ? 0 : EVO_MILESTONES[stg - 1];
@@ -1372,7 +1367,11 @@ void drawInfo() {
       int bw = W - 8;
       spr.fillRect(4, y, bw, 6, DS_LINE);
       int fw = (bw * pct) / 100;
-      if (fw > 0) spr.fillRect(4, y, fw, 6, DS_ORANGE);
+      if (fw > 0) {
+        spr.fillRect(4, y, fw, 6, DS_ORANGE);
+        int tip = fw / 3;                       // yellow tip ≈ last third
+        if (tip > 0) spr.fillRect(4 + fw - tip, y, tip, 6, DS_AMBER);
+      }
     }
     y += 12;
     // LEVEL row.
@@ -1383,8 +1382,20 @@ void drawInfo() {
     spr.setCursor(W - 4 - (int)strlen(lvb) * 6, y); spr.print(lvb);
     y += 12;
 
-    spr.setTextColor(DS_DIM, p.bg);
-    spr.setCursor(4, H - 10); spr.print("hold A: edit");
+    // Footer "hold A · menu" centred (canvas ScreenUsage footer). The middle
+    // dot is drawn as a pixel since the GFX font has no "·" glyph.
+    {
+      const char* fl = "hold A";
+      const char* fr = "menu";
+      int total = (int)strlen(fl) * 6 + 10 + (int)strlen(fr) * 6;   // dot + gaps
+      int fx = (W - total) / 2;
+      int fyy = H - 9;
+      spr.setTextColor(DS_DIM, p.bg);
+      spr.setCursor(fx, fyy); spr.print(fl);
+      int dotx = fx + (int)strlen(fl) * 6 + 5;
+      spr.fillCircle(dotx, fyy + 3, 1, DS_DIM);
+      spr.setCursor(dotx + 5, fyy); spr.print(fr);
+    }
 
   } else {
     _infoHeader(p, y, "CREDITS", infoPage);
@@ -1454,8 +1465,11 @@ static void drawApproval() {
   const Palette& p = characterPalette();
   const int AREA = 132;
   const int TOP = H - AREA;     // 240 - 132 = 108
-  const uint16_t ALARM   = 0xF800;   // red
-  const uint16_t ALLOW_BG = 0x0A20;  // dark green
+  // Canvas ScreenApproval / SPEC #approval palette:
+  //   alarm bar = HOT (0xFA20), footer left fill 0x0220 / fg GREEN 0x07E0,
+  //   footer right fill 0x3000 / fg HOT 0xFA20.
+  const uint16_t ALARM    = 0xFA20;  // HOT — alarm bar (constant red per canvas)
+  const uint16_t ALLOW_BG = 0x0220;  // dark green
   const uint16_t ALLOW_FG = 0x07E0;  // bright green
   const uint16_t DENY_BG  = 0x3000;  // dark red
   const uint16_t DENY_FG  = 0xFA20;
@@ -1464,11 +1478,10 @@ static void drawApproval() {
   spr.fillRect(0, TOP, W, AREA, p.bg);
 
   // ── ALARM BAR ───────────────────────────────────────────────────
-  // Red on arrival; flips to amber once the request has been pending >10 s so
-  // a glance at the bar colour (not just the timer digits) signals staleness.
+  // Per the canvas the bar stays HOT the whole time; only the TIMER text turns
+  // YELLOW once the request has been pending ≥10 s to flag staleness.
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
-  const uint16_t AMBER = 0xFD20;          // orange-amber for the "stale" bar
-  uint16_t barCol = (waited >= 10) ? AMBER : ALARM;
+  const uint16_t barCol = ALARM;
   spr.fillRect(0, TOP, W, 22, barCol);
   spr.setTextSize(2);
   spr.setTextColor(0x0000, barCol);
@@ -1479,22 +1492,23 @@ static void drawApproval() {
   // whether the prompt came from Claude Code, the desktop app, etc.
   if (tama.promptSrc[0]) {
     spr.setTextSize(1);
-    spr.setTextColor(0xFFFF, barCol);
+    spr.setTextColor(0x0000, barCol);
     spr.setCursor(6 + 7 * 12 + 4, TOP + 8);
     spr.print(tama.promptSrc);
   }
-  // elapsed time, right-aligned, black on the bar (the bar itself carries the
-  // colour state now, so the digits stay high-contrast at every age).
+  // elapsed time, right-aligned. Black on the HOT bar, flipping to YELLOW at
+  // ≥10 s (the canvas's staleness cue lives in the timer, not the bar colour).
   spr.setTextSize(2);
   char tb[8]; snprintf(tb, sizeof(tb), "%lus", (unsigned long)waited);
   int tlen = strlen(tb);
-  spr.setTextColor(0x0000, barCol);
+  spr.setTextColor((waited >= 10) ? DS_AMBER : 0x0000, barCol);
   spr.setCursor(W - tlen * 12 - 6, TOP + 4);
   spr.print(tb);
 
   // ── TOOL NAME (huge) ─────────────────────────────────────────────
+  // "TOOL" label is ORANGE per the canvas (size 1 caption above the hero name).
   spr.setTextSize(1);
-  spr.setTextColor(HOT, p.bg);
+  spr.setTextColor(DS_ORANGE, p.bg);
   spr.setCursor(6, TOP + 28);
   spr.print("TOOL");
 
@@ -1548,21 +1562,27 @@ static void drawApproval() {
     spr.print("sent…");
     spr.setTextSize(1);
   } else {
-    // ALLOW: ✓ + label
-    spr.setTextSize(3);
-    spr.setTextColor(ALLOW_FG, ALLOW_BG);
-    spr.setCursor(20, FY + 4);
-    spr.print("OK");
+    // Canvas footer: a big ✓ glyph over "ALLOW" (green) | big ✗ over "DENY"
+    // (red). Adafruit GFX has no check/cross glyph, so draw them as pixel
+    // shapes (thick strokes) centred in each half, label as SPEC's "A allow" /
+    // "B deny" size-1 hints so the button mapping stays readable.
+    int lcx = W / 4;           // left half centre
+    int rcx = W / 2 + W / 4;   // right half centre
+    int gy  = FY + 10;         // glyph baseline-ish
+    // ✓ checkmark — two thick strokes.
+    for (int o = 0; o <= 2; o++) {
+      spr.drawLine(lcx - 7, gy + 2 + o, lcx - 2, gy + 7 + o, ALLOW_FG);
+      spr.drawLine(lcx - 2, gy + 7 + o, lcx + 8, gy - 5 + o, ALLOW_FG);
+    }
+    // ✗ cross — two thick diagonals.
+    for (int o = 0; o <= 2; o++) {
+      spr.drawLine(rcx - 7, gy - 5 + o, rcx + 7, gy + 7 + o, DENY_FG);
+      spr.drawLine(rcx + 7, gy - 5 + o, rcx - 7, gy + 7 + o, DENY_FG);
+    }
     spr.setTextSize(1);
     spr.setTextColor(ALLOW_FG, ALLOW_BG);
     spr.setCursor(16, FY + 28);
     spr.print("A allow");
-    // DENY: ✗ + label
-    spr.setTextSize(3);
-    spr.setTextColor(DENY_FG, DENY_BG);
-    spr.setCursor(W / 2 + 20, FY + 4);
-    spr.print("NO");
-    spr.setTextSize(1);
     spr.setTextColor(DENY_FG, DENY_BG);
     spr.setCursor(W / 2 + 18, FY + 28);
     spr.print("B deny");
@@ -1608,15 +1628,15 @@ static void drawPetStats(const Palette& p) {
   spr.setTextSize(FS_SUB);
 
   // ── FED METER ───────────────────────────────────────────────────
-  // Label is a fixed dim caption (DS_DIM) beside a body-size value — the same
-  // label/value treatment the USAGE info page uses, so the eye reads it the
-  // same here. The value + dot fill stay on the per-character body tint.
+  // Canvas ScreenPet: FED label (dim) + "n/10" (ORANGE) + 10 dots filled ORANGE
+  // (active) / dim outline (empty). The fixed design-system ORANGE matches the
+  // canvas MiniDots(color="#ff8c1a") regardless of the per-buddy palette tint.
   y = 112;
   spr.setTextColor(DS_DIM, p.bg);
   spr.setCursor(6, y);
   spr.print("FED");
   uint8_t fed = statsFedProgress();
-  spr.setTextColor(p.body, p.bg);
+  spr.setTextColor(DS_ORANGE, p.bg);
   // Dynamically right-align so "10/10" (5 chars × 6 px = 30) doesn't run
   // off the 135-px screen — the patch used a fixed W-22 that overflowed.
   char fb[8]; snprintf(fb, sizeof(fb), "%u/10", fed);
@@ -1624,50 +1644,39 @@ static void drawPetStats(const Palette& p) {
   spr.print(fb);
   for (int i = 0; i < 10; i++) {
     int px = 6 + i * 12;
-    if (i < fed) spr.fillCircle(px + 4, y + 16, 4, p.body);
-    else         spr.drawCircle(px + 4, y + 16, 4, p.textDim);
+    if (i < fed) spr.fillCircle(px + 4, y + 16, 4, DS_ORANGE);
+    else         spr.drawCircle(px + 4, y + 16, 4, DS_OFFDOT);
   }
 
-  // ── BATTERY ─────────────────────────────────────────────────────
-  // Real hardware battery (AXP192), replacing the prior pet "energy" tier.
+  // ── ENERGY METER ────────────────────────────────────────────────
+  // Canvas ScreenPet: ENERGY label (dim) + "n/5" (green) + 5 bars filled to the
+  // nap-derived energy tier. Reverted from the AXP192 battery bar to match the
+  // design canvas — energy maps to statsEnergyTier() (0..5, tops up on nap,
+  // drains over time), kept purely visual.
   y = 140;
-  int vBat_mV = (int)(M5.Axp.GetBatVoltage() * 1000);
-  int iBat_mA = (int)M5.Axp.GetBatCurrent();
-  int vBus_mV = (int)(M5.Axp.GetVBusVoltage() * 1000);
-  int pct = (vBat_mV - 3200) / 10;    // (v-3.2)/(4.2-3.2)*100 with mV
-  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
-  bool usb      = vBus_mV > 4000;
-  bool charging = usb && iBat_mA > 1;
-  // Fixed design-system status accents (green ok / amber mid / red low) so the
-  // battery reads the same colour story as the header battery glyph and the
-  // DEVICE/USAGE pages, independent of the buddy skin.
-  uint16_t batCol = (pct >= 50) ? DS_GREEN : (pct >= 20) ? DS_AMBER : DS_REDSOFT;
-
+  uint8_t energy = statsEnergyTier();
+  if (energy > 5) energy = 5;
   spr.setTextSize(FS_SUB);
   spr.setTextColor(DS_DIM, p.bg);
   spr.setCursor(6, y);
-  spr.print("BATTERY");
-  // Mode badge on the right of the label row — right-aligned with 4 px margin.
-  const char* badge = charging ? "CHG" : (usb ? "USB" : nullptr);
-  if (badge) {
-    spr.setTextColor(charging ? DS_AMBER : DS_CYAN, p.bg);
-    spr.setCursor(W - 4 - (int)strlen(badge) * 6, y);
-    spr.print(badge);
+  spr.print("ENERGY");
+  char eb[6]; snprintf(eb, sizeof(eb), "%u/5", energy);
+  spr.setTextColor(DS_GREEN, p.bg);
+  spr.setCursor(W - 4 - (int)strlen(eb) * 6, y);
+  spr.print(eb);
+  // 5 bars across the width: 22×10 filled green (active) / dim outline (empty),
+  // mirroring the canvas MiniBars(value=4,max=5,w=19,h=8).
+  {
+    const int n = 5, barH = 10, gap = 3;
+    int barW = (W - 12 - (n - 1) * gap) / n;   // span the 6..W-6 band
+    int bx0  = 6;
+    int by0  = y + 14;
+    for (int i = 0; i < n; i++) {
+      int bx = bx0 + i * (barW + gap);
+      if (i < energy) spr.fillRect(bx, by0, barW, barH, DS_GREEN);
+      else            spr.drawRect(bx, by0, barW, barH, DS_OFFBAR);
+    }
   }
-  // Percentage in batt color — fits between BATTERY label (ends ~x=48) and
-  // the badge (starts ~x=113 at most). "100%" is 4 chars * 6 = 24 px wide.
-  spr.setTextColor(batCol, p.bg);
-  spr.setCursor(56, y);
-  spr.printf("%d%%", pct);
-
-  // Battery shell with terminal nub + fill
-  int by = y + 12;
-  int bw = W - 18;     // leave room for the terminal on the right
-  int bh = 12;
-  spr.drawRect(6, by, bw, bh, p.textDim);
-  spr.fillRect(6 + bw, by + 3, 4, bh - 6, p.textDim);  // terminal nub
-  int fill = (pct * (bw - 4)) / 100;
-  if (fill > 0) spr.fillRect(8, by + 2, fill, bh - 4, batCol);
 
   // ── DIVIDER ─────────────────────────────────────────────────────
   y = 170;
@@ -1711,7 +1720,7 @@ static void drawPetStats(const Palette& p) {
   spr.setTextColor(DS_DIM, p.bg);
   spr.setCursor(6, y);
   spr.print("TOKENS");
-  spr.setTextColor(p.text, p.bg);
+  spr.setTextColor(DS_WHITE, p.bg);   // canvas: TOKENS value is #fff (white)
   spr.setTextSize(FS_BODY);
   spr.setCursor(6, y + 10);
   spr.print(tokStr(tbuf, sizeof(tbuf), stats().tokens));
@@ -1750,51 +1759,11 @@ static void drawPetHowTo(const Palette& p) {
   ln(p.textDim, " 50K tokens =");
   ln(p.textDim, " level up");         gap();
 
-  ln(p.body,    "BATTERY");
-  ln(p.textDim, " usb charges");      gap();
+  ln(p.body,    "ENERGY");
+  ln(p.textDim, " naps recharge");    gap();
 
   ln(p.textDim, "A: page");
   ln(p.textDim, "hold A: menu");
-}
-
-// Evolution showcase overlay (Pet page PET_PG_SHOWCASE). The character itself
-// is rendered behind us (peeked) with g_evoStage transiently set to the cycling
-// showcase stage in loop(), so the body / antenna / shades / HUD / disguise pop
-// in and out as the demo walks 0..5. We only draw chrome: a compact bottom band
-// with a "Stage N/5" pill, the stage name, and a 6-segment progress strip. The
-// upper region is left untouched so the showing-off character is fully visible.
-static void drawPetShowcase(const Palette& p) {
-  uint8_t s = showcaseStage();          // 0..5, matches the overridden g_evoStage
-
-  // Bottom band only — keep the character region clear.
-  const int BAND_H = 46;
-  const int by = H - BAND_H;
-  spr.fillRect(0, by, W, BAND_H, p.bg);
-  spr.drawFastHLine(0, by, W, p.textDim);
-
-  // "Stage N/5" pill (left) + stage name (right).
-  int ty = by + 6;
-  spr.fillRoundRect(4, ty, 56, 16, 3, p.body);
-  spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(9, ty + 4);
-  spr.printf("Stage %u/5", s);
-
-  spr.setTextColor(p.text, p.bg);
-  const char* name = EVO_STAGE_NAMES[s <= 5 ? s : 5];
-  spr.setCursor(W - 4 - (int)strlen(name) * 6, ty + 4);
-  spr.print(name);
-
-  // 6-segment progress strip: filled = stages reached so far this cycle, the
-  // current one highlighted, the rest dim (a "still to come" preview).
-  int sy = by + 28;
-  int segW = (W - 8) / 6;
-  for (uint8_t i = 0; i <= 5; i++) {
-    int sx = 4 + i * segW;
-    if (i == s)      spr.fillRect(sx, sy, segW - 2, 10, p.body);
-    else if (i < s)  spr.fillRect(sx, sy, segW - 2, 10, p.text);
-    else             spr.drawRect(sx, sy, segW - 2, 10, p.textDim);
-  }
 }
 
 // Pet header strip — the same dark band + hairlines + FS_HEADER title look the
@@ -1837,11 +1806,6 @@ static void drawPetHeader(const Palette& p) {
 
 void drawPet() {
   const Palette& p = characterPalette();
-
-  // The showcase page draws only a bottom chrome band over the peeked,
-  // stage-cycling character — no full-screen page, no top title row (which
-  // would otherwise cover the character's head as it shows off each form).
-  if (petPage == PET_PG_SHOWCASE) { drawPetShowcase(p); return; }
 
   if (petPage == 0) drawPetStats(p);
   else drawPetHowTo(p);
@@ -2287,10 +2251,13 @@ static void humanCostumeTick(uint32_t now) {
 // digitalRead, the ADC pin (GPIO36) with analogRead → volts. Composes into
 // `spr`; adapterTick() handles the BtnB-exit, throttle, and blit.
 static void drawAdapter() {
-  // Probe set mirrors the M5StickC Plus header pins. 36 is ADC-only input.
-  struct Pin { uint8_t n; const char* mode; bool adc; };
+  // Probe set mirrors the canvas ScreenAdapter rows: G26 IN, G36 ADC, G0 OUT,
+  // G32 IN. 36 is ADC-only input; the OUT pin is reported as a driven output
+  // (no digitalRead) so it reads "LO ·" like the canvas.
+  struct Pin { uint8_t n; const char* mode; bool adc; bool out; };
   static const Pin pins[] = {
-    { 26, "IN ", false }, { 36, "ADC", true }, { 0, "IN ", false }, { 32, "IN ", false }
+    { 26, "IN ", false, false }, { 36, "ADC", true, false },
+    { 0,  "OUT", false, true  }, { 32, "IN ", false, false }
   };
   const int NP = sizeof(pins) / sizeof(pins[0]);
 
@@ -2327,6 +2294,11 @@ static void drawAdapter() {
       int mv = (raw * 3300) / 4095;
       snprintf(val, sizeof(val), "%d.%02dV", mv / 1000, (mv % 1000) / 10);
       vcol = DS_CYAN; edge = "~";
+    } else if (pins[i].out) {
+      // Driven output — report its level without reconfiguring as input.
+      bool hi = digitalRead(pins[i].n);
+      snprintf(val, sizeof(val), "%s", hi ? "HI" : "LO");
+      vcol = hi ? DS_GREEN : DS_DIM; edge = ".";   // canvas G0 OUT LO ·
     } else {
       pinMode(pins[i].n, INPUT);
       bool hi = digitalRead(pins[i].n);
@@ -2349,8 +2321,8 @@ static void drawAdapter() {
   spr.drawFastHLine(0, fy, W, DS_LINE);
   spr.setTextSize(1);
   spr.setTextColor(DS_DIM, DS_DARK);
-  spr.setCursor(6, fy + 4); spr.print("BtnB exit");
-  const char* fr = "2Hz sample";
+  spr.setCursor(6, fy + 4); spr.print("MCP-driven");   // canvas footer left
+  const char* fr = "16Hz sample";                       // canvas footer right
   spr.setCursor(W - 6 - (int)strlen(fr) * 6, fy + 4); spr.print(fr);
 }
 
@@ -2361,34 +2333,41 @@ static void drawAdapter() {
 // the celebrate scene reads as a special moment. Drawn over the live frame.
 static void drawStageUp(uint8_t stage) {
   if (stage > 5) stage = 5;
-  // Top header band — gradient-ish dark purple.
-  const int TH = 40;
+  // Top header band — dark purple (canvas gradient top). Sized to fit the
+  // size-3 STAGE hero with EVOLUTION above and the stage name below.
+  const int TH = 58;
   spr.fillRect(0, 0, W, TH, DS_SUTOP);
+  // EVOLUTION — size 1 YELLOW, centred (canvas y≈0..14).
   spr.setTextSize(1);
   spr.setTextColor(DS_AMBER, DS_SUTOP);
   const char* el = "EVOLUTION";
-  spr.setCursor((W - (int)strlen(el) * 6) / 2, 3); spr.print(el);
-  spr.setTextSize(2);
+  spr.setCursor((W - (int)strlen(el) * 6) / 2, 4); spr.print(el);
+  // STAGE n — HERO size 3 white, centred (canvas y≈14..44). "STAGE 5" = 126px.
+  spr.setTextSize(FS_HERO);
   spr.setTextColor(DS_WHITE, DS_SUTOP);
   char sb[12]; snprintf(sb, sizeof(sb), "STAGE %u", stage);
-  spr.setCursor((W - (int)strlen(sb) * 12) / 2, 14); spr.print(sb);
+  spr.setCursor((W - (int)strlen(sb) * 18) / 2, 16); spr.print(sb);
+  // Stage name ("ASCENDED" at stage 5) — size 1 PINK, centred (canvas y≈44).
   spr.setTextSize(1);
   spr.setTextColor(DS_PINK, DS_SUTOP);
   const char* name = (stage >= 5) ? "ASCENDED" : EVO_STAGE_NAMES[stage];
-  spr.setCursor((W - (int)strlen(name) * 6) / 2, 31); spr.print(name);
+  spr.setCursor((W - (int)strlen(name) * 6) / 2, 44); spr.print(name);
   spr.drawFastHLine(0, TH, W, DS_PINK);
 
   // Bottom payoff band.
   const int BH = 30, BY = H - BH;
   spr.fillRect(0, BY, W, BH, DS_SUBOT);
   spr.drawFastHLine(0, BY, W, DS_PINK);
-  spr.setTextSize(2);
+  // "DJ MODE!" — size 2 PINK, centred (canvas banner).
+  spr.setTextSize(FS_HEADER);
   spr.setTextColor(DS_PINK, DS_SUBOT);
   const char* dj = "DJ MODE!";
   spr.setCursor((W - (int)strlen(dj) * 12) / 2, BY + 4); spr.print(dj);
+  // Unlock copy — size 1 DIM, centred. Canvas "unlocked · settings ▸ dj";
+  // the GFX font has no ·/▸ glyphs so render the readable ASCII equivalent.
   spr.setTextSize(1);
   spr.setTextColor(DS_DIM, DS_SUBOT);
-  const char* un = "unlocked";
+  const char* un = "unlocked settings>dj";
   spr.setCursor((W - (int)strlen(un) * 6) / 2, BY + 21); spr.print(un);
 }
 
@@ -2664,9 +2643,6 @@ void loop() {
     } else if (displayMode == DISP_PET) {
       beep(2400, 30);
       petPage = (petPage + 1) % PET_PAGES;
-      // Entering the evolution showcase restarts the cycle at Stage 0 so it
-      // always opens on the base form and walks up from there.
-      if (petPage == PET_PG_SHOWCASE) showcaseStartMs = millis();
       applyDisplayMode();
     } else {
       beep(2400, 30);
@@ -2683,16 +2659,6 @@ void loop() {
   clockRefreshRtc();   // 1Hz internal throttle; also caches _onUsb
   g_evoStage   = evoStage();      // refresh the mirrors gr0m.cpp renders from
   g_dispTokens = stats().tokens;
-
-  // Evolution showcase override. The mirror above was just reset to the TRUE
-  // evoStage(); here we transiently retarget it to the showcase's cycling
-  // stage so buddyTick() (which runs below, reading g_evoStage) draws each
-  // upgrade in turn. Because this is reapplied from truth every loop, simply
-  // leaving the page — or opening a menu over it — restores the real stage on
-  // the very next frame. No persistence, no statsSetTokens, nothing touched.
-  bool showcasing = showcasePageActive() && !settingsOpen && !connOpen
-                 && !usageOpen && !resetOpen && !inPrompt;
-  if (showcasing) g_evoStage = showcaseStage();
 
   // Stage-5 DJ-unlock announce (one-time per boot). statsSetTokens latches
   // _djUnlocked the first time the character reaches Stage 5; when we observe
