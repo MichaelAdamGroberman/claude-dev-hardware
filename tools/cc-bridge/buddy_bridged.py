@@ -48,7 +48,7 @@ HEARTBEAT_S = 10
 DEFAULT_PROMPT_TIMEOUT_S = 30
 
 # Evolution stage milestones (lifetime tokens → stage)
-_EVO_MILESTONES = [250_000_000, 100_000_000, 25_000_000, 5_000_000, 1_000_000]
+_EVO_MILESTONES = [1_250_000, 1_000_000, 750_000, 500_000, 250_000]  # a stage every ~5 levels (250K)
 
 
 def log(msg: str) -> None:

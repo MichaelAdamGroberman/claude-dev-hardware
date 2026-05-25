@@ -177,6 +177,17 @@ static const uint16_t VISOR_ALERT= 0xF800;  // red
 static const uint16_t VISOR_LOVE = 0xF81F;  // magenta
 static const uint16_t VISOR_OFF  = 0x18C3;  // dim slate
 
+// ── Stage-5 "human disguise" palette ────────────────────────────────
+// The robot's unconvincing attempt to pass as a person: a tan trench
+// coat, a darker fedora, and opaque human glasses. Warm browns so the
+// disguise reads as fabric/felt against the cold brushed-steel chassis.
+static const uint16_t COAT_TAN   = 0xB425;  // trench-coat khaki
+static const uint16_t COAT_SH    = 0x8302;  // coat shadow / fold lines
+static const uint16_t COAT_HI    = 0xD568;  // coat highlight / seam
+static const uint16_t HAT_BROWN  = 0x4163;  // fedora felt
+static const uint16_t HAT_SH     = 0x2061;  // fedora shadow
+static const uint16_t HAT_BAND   = 0x18E3;  // fedora hatband (near-black)
+
 // ── Particle primitives ─────────────────────────────────────────────
 
 static void drawHeart(int x, int y, uint16_t c) {
@@ -1175,6 +1186,182 @@ static void drawChestLCD(const char* text) {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//   STAGE-5 FINAL FORM — "robot in a trench coat" human disguise
+// ────────────────────────────────────────────────────────────────────
+//   At the final evolution stage gr0m tries to pass as a person to hide
+//   that it's an AGI: a long trench coat with an upturned collar over the
+//   chest, a fedora on the head, opaque human-style glasses, and an
+//   occasional "tell" (a flat speech bubble insisting it's normal). It's
+//   deliberately unconvincing — a steel cube cosplaying a human.
+//
+//   Geometry follows the existing 3D helpers:
+//     • the coat rides the CHEST front plane (z = +12, like drawBolt3D)
+//       so it tracks tilt with the body
+//     • the fedora + glasses ride the HEAD front plane (z = +22, like
+//       drawSunglasses3D / onFace) and only draw when the front face is
+//       visible — they vanish as the head turns away, same as the visor
+// ════════════════════════════════════════════════════════════════════
+
+// Project a point on the CHEST front-face plane (z = +12) to screen. Mirror
+// of onFace() but for the body, so coat panels track the chest the way the
+// brand bolt does in drawBolt3D.
+static V2 onChest(float x, float y) {
+  return rp({ x, y, 12.0f });
+}
+
+// Long trench coat draped over the chest/body, with an upturned collar that
+// rises toward the neck and a center seam with buttons. Rides the chest
+// front plane so it leans with body tilt. No backface gate — the coat wraps
+// the whole torso, so it stays sensible even as the body turns.
+static void drawTrenchcoat() {
+  // Coat body — a broad panel over the chest front, slightly wider than the
+  // chest cube so it reads as draped fabric rather than painted-on.
+  V2 tl = onChest(-24, 27);    // shoulders (chest top is y≈27)
+  V2 tr = onChest( 24, 27);
+  V2 br = onChest( 20, 50);    // hem, tucked in a touch at the bottom
+  V2 bl = onChest(-20, 50);
+  _t->fillTriangle(tl.x, tl.y, tr.x, tr.y, br.x, br.y, COAT_TAN);
+  _t->fillTriangle(tl.x, tl.y, br.x, br.y, bl.x, bl.y, COAT_TAN);
+  // Lapels — two angled flaps opening from the collar down to mid-chest,
+  // drawn in shadow so the V of the opening reads.
+  V2 nkL = onChest(-5, 27);
+  V2 nkR = onChest( 5, 27);
+  V2 lpL = onChest(-22, 30);
+  V2 lpR = onChest( 22, 30);
+  V2 mid = onChest( 0, 40);
+  _t->fillTriangle(nkL.x, nkL.y, lpL.x, lpL.y, mid.x, mid.y, COAT_SH);
+  _t->fillTriangle(nkR.x, nkR.y, lpR.x, lpR.y, mid.x, mid.y, COAT_SH);
+  // Center seam + buttons down the front.
+  V2 sTop = onChest(0, 30);
+  V2 sBot = onChest(0, 49);
+  _t->drawLine(sTop.x, sTop.y, sBot.x, sBot.y, COAT_SH);
+  for (int by = 36; by <= 46; by += 5) {
+    V2 b = onChest(1, (float)by);
+    _t->fillCircle(b.x, b.y, 1, HAT_BAND);
+  }
+  // Upturned collar — two short panels standing up either side of the neck,
+  // the classic "hiding my face" trench-coat collar. Rises above the chest
+  // top toward the head.
+  V2 cL0 = onChest(-12, 26);
+  V2 cL1 = onChest(-3, 18);
+  V2 cL2 = onChest(-8, 26);
+  V2 cR0 = onChest( 12, 26);
+  V2 cR1 = onChest( 3, 18);
+  V2 cR2 = onChest( 8, 26);
+  _t->fillTriangle(cL0.x, cL0.y, cL1.x, cL1.y, cL2.x, cL2.y, COAT_HI);
+  _t->fillTriangle(cR0.x, cR0.y, cR1.x, cR1.y, cR2.x, cR2.y, COAT_HI);
+  _t->drawLine(cL0.x, cL0.y, cL1.x, cL1.y, COAT_SH);
+  _t->drawLine(cR0.x, cR0.y, cR1.x, cR1.y, COAT_SH);
+  // Shoulder seam highlight.
+  _t->drawLine(tl.x, tl.y, tr.x, tr.y, COAT_HI);
+}
+
+// Fedora perched on the head — felt crown + wide brim with a dark hatband.
+// Rides the head front plane (z = +22) so it tracks rotation, and only
+// draws when the front face is visible like the other face-mounted gear.
+static void drawFedora() {
+  if (!frontFaceVisible()) return;
+  // Brim — a flat-ish ellipse straddling the top of the head (head top
+  // y≈-20). Built from two triangles across the front plane so it skews
+  // with rotation. Drawn first so the crown overlaps it.
+  V2 bL = onFace(-26, -18);
+  V2 bR = onFace( 26, -18);
+  V2 bF = onFace(  0, -14);    // front lip dips toward the viewer
+  V2 bB = onFace(  0, -22);    // back edge
+  _t->fillTriangle(bL.x, bL.y, bR.x, bR.y, bF.x, bF.y, HAT_BROWN);
+  _t->fillTriangle(bL.x, bL.y, bR.x, bR.y, bB.x, bB.y, HAT_BROWN);
+  _t->drawLine(bL.x, bL.y, bF.x, bF.y, HAT_SH);
+  _t->drawLine(bR.x, bR.y, bF.x, bF.y, HAT_SH);
+  // Crown — trapezoid sitting on the brim, with a pinched dent on top.
+  V2 kBL = onFace(-15, -19);
+  V2 kBR = onFace( 15, -19);
+  V2 kTL = onFace(-11, -31);
+  V2 kTR = onFace( 11, -31);
+  _t->fillTriangle(kBL.x, kBL.y, kBR.x, kBR.y, kTR.x, kTR.y, HAT_BROWN);
+  _t->fillTriangle(kBL.x, kBL.y, kTR.x, kTR.y, kTL.x, kTL.y, HAT_BROWN);
+  // Pinch dent — a darker crease down the crown center.
+  V2 dT = onFace(0, -31);
+  V2 dB = onFace(0, -23);
+  _t->drawLine(dT.x, dT.y, dB.x, dB.y, HAT_SH);
+  // Hatband — dark stripe around the base of the crown.
+  V2 hbL = onFace(-15, -20);
+  V2 hbR = onFace( 15, -20);
+  _t->drawLine(hbL.x, hbL.y, hbR.x, hbR.y, HAT_BAND);
+  _t->drawLine(hbL.x, hbL.y + 1, hbR.x, hbR.y + 1, HAT_BAND);
+  // Crown top highlight.
+  _t->drawLine(kTL.x, kTL.y, kTR.x, kTR.y, COAT_HI);
+}
+
+// Opaque human-style glasses — squarer than the aviator sunglasses, with a
+// heavy "trying too hard to look studious" frame. Rides the head front
+// plane and only draws when the front face is visible. When wired into a
+// Stage-5 everyday state this REPLACES the bot's own sunglasses (the
+// disguise is the headline final look, so it wins the conflict).
+static void drawHumanGlasses() {
+  if (!frontFaceVisible()) return;
+  // Two rounded-rectangle lenses sitting over the visor band (y≈-1).
+  V2 lTL = onFace(-19, -6);  V2 lBR = onFace(-3, 4);
+  V2 rTL = onFace(  3, -6);  V2 rBR = onFace(19, 4);
+  // Left lens
+  _t->fillRect(lTL.x, lTL.y, lBR.x - lTL.x, lBR.y - lTL.y, INK);
+  _t->drawRect(lTL.x - 1, lTL.y - 1, (lBR.x - lTL.x) + 2, (lBR.y - lTL.y) + 2, STEEL);
+  _t->drawRect(lTL.x, lTL.y, lBR.x - lTL.x, lBR.y - lTL.y, STEEL);
+  // Right lens
+  _t->fillRect(rTL.x, rTL.y, rBR.x - rTL.x, rBR.y - rTL.y, INK);
+  _t->drawRect(rTL.x - 1, rTL.y - 1, (rBR.x - rTL.x) + 2, (rBR.y - rTL.y) + 2, STEEL);
+  _t->drawRect(rTL.x, rTL.y, rBR.x - rTL.x, rBR.y - rTL.y, STEEL);
+  // Heavy nose bridge between the lenses.
+  V2 brL = onFace(-3, -2);
+  V2 brR = onFace( 3, -2);
+  _t->drawLine(brL.x, brL.y, brR.x, brR.y, STEEL);
+  _t->drawLine(brL.x, brL.y + 1, brR.x, brR.y + 1, STEEL);
+  // Temple arms running back toward the ears (track parallax slightly).
+  V2 tL = onFace(-25, -3);
+  V2 tR = onFace( 25, -3);
+  _t->drawLine(lTL.x - 1, brL.y, tL.x, tL.y, STEEL);
+  _t->drawLine(rBR.x + 1, brR.y, tR.x, tR.y, STEEL);
+  // Single specular glint so the lenses read as glass, parallax-shifted.
+  V2 gl = onFace(-16 + (float)_tiltX, -4);
+  _t->drawPixel(gl.x, gl.y, SPECULAR);
+  _t->drawPixel(gl.x + 1, gl.y, SPECULAR);
+}
+
+// The "tell" — gr0m periodically over-acts being human with a flat speech
+// bubble ("HELLO HUMAN" / "I AM NORMAL"), and otherwise wears a stiff fake
+// smile so the disguise reads as unconvincing. The bubble cycles every few
+// seconds; between bubbles only the smile shows. Reuses drawSpeechBubble.
+static void drawHumanTell(uint32_t t) {
+  // ~2.6 s per phase at 5 fps; show a bubble ~40% of the time, then a beat
+  // of nothing so the over-acting feels intermittent rather than constant.
+  uint8_t phase = (t / 13) % 5;
+  if (phase == 0) {
+    drawSpeechBubble("HELLO HUMAN", INK);
+  } else if (phase == 2) {
+    drawSpeechBubble("I AM NORMAL", INK);
+  }
+  // Stiff fake smile under the glasses — a too-wide flat grin on the front
+  // face. Only when the face is toward us, like the other face decorations.
+  if (!frontFaceVisible()) return;
+  V2 sL = onFace(-9, 15);
+  V2 sR = onFace( 9, 15);
+  V2 cL = onFace(-9, 12);    // corners hitched up — forced smile
+  V2 cR = onFace( 9, 12);
+  _t->drawLine(sL.x, sL.y, sR.x, sR.y, CHASSIS_SH);
+  _t->drawLine(sL.x, sL.y, cL.x, cL.y, CHASSIS_SH);
+  _t->drawLine(sR.x, sR.y, cR.x, cR.y, CHASSIS_SH);
+}
+
+// One-call composite for the Stage-5 disguise everyday look. Order matters:
+// coat first (body layer), then the head gear over the chassis, then the
+// tell on top of everything.
+static void drawHumanDisguise(uint32_t t) {
+  drawTrenchcoat();
+  drawFedora();
+  drawHumanGlasses();
+  drawHumanTell(t);
+}
+
+// ════════════════════════════════════════════════════════════════════
 //   DJ MODE — "gr0m on the decks" booth scene (bonus, not a mood-state)
 // ────────────────────────────────────────────────────────────────────
 //   A standalone full-detail scene driven by a deterministic internal
@@ -1390,11 +1577,12 @@ static void doIdle(uint32_t t) {
   drawNeck3D();
   drawHead3D();
   drawVisor3D(VISOR_IDLE);
-  drawSunglasses3D();
+  if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(((t / 25) % 5 == 0) ? 2 : 0);
   drawJoint3D(t, true);
   drawAntenna3D(0);
   drawSmokeFromMouth(t, 2, 0);
+  if (evoStage() >= 5) drawHumanDisguise(t);  // Stage 5 (Ascended): final form
   drawMoodParticles(t, 2, 3);
 }
 
@@ -1411,13 +1599,14 @@ static void doBusy(uint32_t t) {
   drawVisor3D(VISOR_BUSY);
   drawMouth3D(3);                   // grimace
   drawAntenna3D(ledPulse ? VISOR_BUSY : 0);
-  // NEW: headphones on, sunglasses off, hands typing on laptop.
-  // Discarded items remain as cameo in upper corners but smaller —
-  // gr0m is fully focused now.
-  if (evoStage() >= 5) {            // Stage 5 (Ascended): work rig
-    drawHeadphones();
+  // Stage 5 (Ascended): final form. The disguise headlines — the fedora
+  // takes the head slot that headphones used to hold (hat wins the conflict),
+  // but the work rig (laptop + typing hands) still reads underneath the coat
+  // since it doesn't fight the head gear.
+  if (evoStage() >= 5) {
     drawLaptop(t);
     drawHandsAtLaptop();
+    drawHumanDisguise(t);
   }
   drawMoodParticles(t, 4, 1);
 }
@@ -1433,11 +1622,19 @@ static void doAttention(uint32_t t) {
   drawNeck3D();
   drawHead3D();
   drawVisor3D(VISOR_ALERT);
-  drawSunglasses3D();
+  if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(4);                     // O shout
   drawJoint3D(t, true);
   drawAntenna3D(pulse ? VISOR_ALERT : 0);
   drawSmokeFromMouth(t, 1, 0);
+  // Stage 5 (Ascended): final form. Wear the coat/fedora/glasses but keep
+  // the alarm "!" as the attention tell so we don't stack two bubbles — the
+  // disguise's own "HELLO HUMAN" bubble would fight the alert here.
+  if (evoStage() >= 5) {
+    drawTrenchcoat();
+    drawFedora();
+    drawHumanGlasses();
+  }
   drawMoodParticles(t, 5, 1);
   // NEW: pixel speech bubble — blinks on every other tick.
   if (pulse && evoStage() >= 5) drawSpeechBubble("!", VISOR_ALERT);  // Stage 5
@@ -1478,10 +1675,11 @@ static void doDizzy(uint32_t t) {
   drawNeck3D();
   drawHead3D();
   drawVisor3D(v);
-  drawSunglasses3D();
+  if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(6);                     // X
   drawJoint3D(t, false);              // extinguished
   drawAntenna3D((t & 3) == 0 ? CRIMSON : 0);
+  if (evoStage() >= 5) drawHumanDisguise(t);  // Stage 5 (Ascended): final form
   drawMoodParticles(t, 3, 2);
 }
 
@@ -1495,12 +1693,15 @@ static void doHeart(uint32_t t) {
   drawNeck3D();
   drawHead3D();
   drawVisor3D(VISOR_LOVE);
-  drawSunglasses3D();
+  if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(((t / 8) & 1) ? 2 : 7);
   drawJoint3D(t, true);
   drawAntenna3D(((t / 3) & 1) ? HEART_RED : 0);
   drawSmokeFromMouth(t, 2, 0);
-  if (evoStage() >= 5) drawHeartCloud(t);   // Stage 5 (Ascended): heart cloud
+  if (evoStage() >= 5) {            // Stage 5 (Ascended): final form + heart cloud
+    drawHeartCloud(t);
+    drawHumanDisguise(t);
+  }
   drawMoodParticles(t, 4, 2);
 }
 

@@ -25,11 +25,12 @@ struct Stats {
   uint16_t noCount;          // denials this period (daemon-driven display counter)
 };
 
-// Character evolution milestones (lifetime tokens). The gr0m mascot assembles
-// itself stage by stage as lifetime usage crosses these. Kept in sync with the
-// daemon's evoStage() and the design spec.
+// Character evolution milestones (lifetime tokens): a new stage every ~5 levels
+// (250K tokens), so the mascot visibly gains gear as you level up — Stage 1 by
+// level 5, fully grown (and DJ unlocked) by level 25. Kept in sync with the
+// daemon's _EVO_MILESTONES.
 static const uint32_t EVO_MILESTONES[5] = {
-  1000000UL, 5000000UL, 25000000UL, 100000000UL, 250000000UL
+  250000UL, 500000UL, 750000UL, 1000000UL, 1250000UL
 };
 
 static Stats _stats;

@@ -22,6 +22,7 @@ Behavior:
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import socket
 import sys
@@ -32,6 +33,47 @@ SOCK_PATH = Path.home() / ".cache" / "claude-buddy" / "buddy.sock"
 # 30s "approve?" timer. Override per-tool by setting BUDDY_TIMEOUT in the
 # hook environment.
 DEFAULT_TIMEOUT_S = 30
+
+
+def _allow_rules(cwd: str):
+    """permissions.allow entries from user + project settings (best-effort)."""
+    rules = []
+    paths = [Path.home() / ".claude" / "settings.json"]
+    if cwd:
+        paths += [Path(cwd) / ".claude" / "settings.local.json",
+                  Path(cwd) / ".claude" / "settings.json"]
+    for p in paths:
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            rules += ((d.get("permissions") or {}).get("allow") or [])
+        except Exception:
+            pass
+    return rules
+
+
+def _auto_approved(tool_name: str, tool_input: dict, rules) -> bool:
+    """True if an allow rule means Claude runs this WITHOUT prompting — so the
+    device shouldn't show a phantom approval with no on-screen counterpart.
+    Best-effort match of Claude Code's permission syntax; a false match only
+    costs a missed device prompt (Claude still gates on its side)."""
+    cmd = tool_input.get("command", "") or ""
+    fpath = tool_input.get("file_path", "") or tool_input.get("path", "") or ""
+    for r in rules:
+        if r == tool_name:
+            return True                                  # bare tool: all uses allowed
+        if r.startswith(tool_name + "(") and r.endswith(")"):
+            inner = r[len(tool_name) + 1:-1].strip()
+            if inner in ("*", ""):
+                return True
+            if tool_name == "Bash":
+                spec = inner[:-2] if inner.endswith(":*") else inner
+                if spec.endswith("*"):
+                    spec = spec[:-1]
+                if cmd == inner or (spec and cmd.startswith(spec)) or fnmatch.fnmatch(cmd, inner):
+                    return True
+            elif fpath == inner or fnmatch.fnmatch(fpath, inner):
+                return True
+    return False
 
 
 def main() -> int:
@@ -60,6 +102,11 @@ def main() -> int:
         return 0                                   # nothing requires approval
     if mode == "acceptEdits" and tool_name in EDIT_TOOLS:
         return 0                                   # edits auto-accepted
+
+    # Auto-approved by an allow rule → Claude runs it without prompting, so the
+    # device shouldn't show a phantom approval that has no on-screen counterpart.
+    if _auto_approved(tool_name, tool_input, _allow_rules(payload.get("cwd", ""))):
+        return 0
 
     # Build a short hint string. Bash commands are the most important
     # case so prefer the command itself; otherwise pick a meaningful
