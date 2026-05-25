@@ -233,16 +233,8 @@ static const uint16_t VISOR_ALERT= 0xF800;  // red
 static const uint16_t VISOR_LOVE = 0xF81F;  // magenta
 static const uint16_t VISOR_OFF  = 0x18C3;  // dim slate
 
-// ── Stage-5 "human disguise" palette ────────────────────────────────
-// The robot's unconvincing attempt to pass as a person: a tan trench
-// coat, a darker fedora, and opaque human glasses. Warm browns so the
-// disguise reads as fabric/felt against the cold brushed-steel chassis.
-static const uint16_t COAT_TAN   = 0xB425;  // trench-coat khaki
-static const uint16_t COAT_SH    = 0x8302;  // coat shadow / fold lines
-static const uint16_t COAT_HI    = 0xD568;  // coat highlight / seam
-static const uint16_t HAT_BROWN  = 0x4163;  // fedora felt
-static const uint16_t HAT_SH     = 0x2061;  // fedora shadow
-static const uint16_t HAT_BAND   = 0x18E3;  // fedora hatband (near-black)
+// (The Stage-5 human-costume palette lives next to its primitives further
+//  down — see the HC_* block before drawHumanHoodie.)
 
 // ── Particle primitives ─────────────────────────────────────────────
 
@@ -1332,492 +1324,473 @@ static void drawDesk() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//   STAGE-5 FINAL FORM — "robot in a trench coat" human disguise
+//   STAGE-5 FINAL FORM — the HUMAN COSTUME ("AGI cosplaying a human")
 // ────────────────────────────────────────────────────────────────────
-//   At the final evolution stage gr0m tries to pass as a person to hide
-//   that it's an AGI: a long trench coat with an upturned collar over the
-//   chest, a fedora on the head, opaque human-style glasses, and an
-//   occasional "tell" (a flat speech bubble insisting it's normal). It's
-//   deliberately unconvincing — a steel cube cosplaying a human.
-//
-//   Geometry follows the existing 3D helpers:
-//     • the coat rides the CHEST front plane (z = +12, like drawBolt3D)
-//       so it tracks tilt with the body
-//     • the fedora + glasses ride the HEAD front plane (z = +22, like
-//       drawSunglasses3D / onFace) and only draw when the front face is
-//       visible — they vanish as the head turns away, same as the visor
+//   At the final evolution stage gr0m tries to pass as a person — and
+//   every detail is slightly WRONG by design. Reconciled exactly to the
+//   authoritative canvas in deployment/gr0m/SPEC.md #human-costume +
+//   deployment/source/gr0m.jsx (HumanCostume). Six detail elements, drawn
+//   BACK TO FRONT: hoodie → face mask → wig → antenna-poke → coffee →
+//   bubble (see drawHumanCostumeFull). The primitives are authored in the
+//   canvas's absolute pixel coords (face center 67,55) and mapped onto the
+//   3D pipeline through cvFace()/cvChest(), so the whole disguise tracks
+//   head/body tilt like the visor + brand bolt do.
 // ════════════════════════════════════════════════════════════════════
 
 // Project a point on the CHEST front-face plane (z = +12) to screen. Mirror
-// of onFace() but for the body, so coat panels track the chest the way the
-// brand bolt does in drawBolt3D.
+// of onFace() but for the body, so the hoodie + coffee track the chest the
+// way the brand bolt does in drawBolt3D.
 static V2 onChest(float x, float y) {
   return rp({ x, y, 12.0f });
 }
 
-// Long trench coat draped over the chest/body, with an upturned collar that
-// rises toward the neck and a center seam with buttons. Rides the chest
-// front plane so it leans with body tilt. No backface gate — the coat wraps
-// the whole torso, so it stays sensible even as the body turns.
-static void drawTrenchcoat() {
-  // Coat body — a broad panel over the chest front, slightly wider than the
-  // chest cube so it reads as draped fabric rather than painted-on.
-  V2 tl = onChest(-24, 27);    // shoulders (chest top is y≈27)
-  V2 tr = onChest( 24, 27);
-  V2 br = onChest( 20, 50);    // hem, tucked in a touch at the bottom
-  V2 bl = onChest(-20, 50);
-  _t->fillTriangle(tl.x, tl.y, tr.x, tr.y, br.x, br.y, COAT_TAN);
-  _t->fillTriangle(tl.x, tl.y, br.x, br.y, bl.x, bl.y, COAT_TAN);
-  // Lapels — two angled flaps opening from the collar down to mid-chest,
-  // drawn in shadow so the V of the opening reads.
-  V2 nkL = onChest(-5, 27);
-  V2 nkR = onChest( 5, 27);
-  V2 lpL = onChest(-22, 30);
-  V2 lpR = onChest( 22, 30);
-  V2 mid = onChest( 0, 40);
-  _t->fillTriangle(nkL.x, nkL.y, lpL.x, lpL.y, mid.x, mid.y, COAT_SH);
-  _t->fillTriangle(nkR.x, nkR.y, lpR.x, lpR.y, mid.x, mid.y, COAT_SH);
-  // Center seam + buttons down the front.
-  V2 sTop = onChest(0, 30);
-  V2 sBot = onChest(0, 49);
-  _t->drawLine(sTop.x, sTop.y, sBot.x, sBot.y, COAT_SH);
-  for (int by = 36; by <= 46; by += 5) {
-    V2 b = onChest(1, (float)by);
-    _t->fillCircle(b.x, b.y, 1, HAT_BAND);
-  }
-  // Upturned collar — two short panels standing up either side of the neck,
-  // the classic "hiding my face" trench-coat collar. Rises above the chest
-  // top toward the head.
-  V2 cL0 = onChest(-17, 27);
-  V2 cL1 = onChest(-2, 7);     // huge collar peak rising up around the face
-  V2 cL2 = onChest(-11, 27);
-  V2 cR0 = onChest( 17, 27);
-  V2 cR1 = onChest( 2, 7);
-  V2 cR2 = onChest( 11, 27);
-  _t->fillTriangle(cL0.x, cL0.y, cL1.x, cL1.y, cL2.x, cL2.y, COAT_HI);
-  _t->fillTriangle(cR0.x, cR0.y, cR1.x, cR1.y, cR2.x, cR2.y, COAT_HI);
-  _t->drawLine(cL0.x, cL0.y, cL1.x, cL1.y, COAT_SH);
-  _t->drawLine(cR0.x, cR0.y, cR1.x, cR1.y, COAT_SH);
-  // Shoulder seam highlight.
-  _t->drawLine(tl.x, tl.y, tr.x, tr.y, COAT_HI);
-}
-
-// Fedora perched on the head — felt crown + wide brim with a dark hatband.
-// Rides the head front plane (z = +22) so it tracks rotation, and only
-// draws when the front face is visible like the other face-mounted gear.
-static void drawFedora() {
-  if (!frontFaceVisible()) return;
-  // Brim — a flat-ish ellipse straddling the top of the head (head top
-  // y≈-20). Built from two triangles across the front plane so it skews
-  // with rotation. Drawn first so the crown overlaps it.
-  V2 bL = onFace(-32, -11);
-  V2 bR = onFace( 32, -11);
-  V2 bF = onFace(  0,  -6);    // front lip dips low toward the viewer
-  V2 bB = onFace(  0, -16);    // back edge
-  _t->fillTriangle(bL.x, bL.y, bR.x, bR.y, bF.x, bF.y, HAT_BROWN);
-  _t->fillTriangle(bL.x, bL.y, bR.x, bR.y, bB.x, bB.y, HAT_BROWN);
-  _t->drawLine(bL.x, bL.y, bF.x, bF.y, HAT_SH);
-  _t->drawLine(bR.x, bR.y, bF.x, bF.y, HAT_SH);
-  // Tall crown — trapezoid sitting on the brim, jammed down low, pinched on top.
-  V2 kBL = onFace(-19, -12);
-  V2 kBR = onFace( 19, -12);
-  V2 kTL = onFace(-14, -36);
-  V2 kTR = onFace( 14, -36);
-  _t->fillTriangle(kBL.x, kBL.y, kBR.x, kBR.y, kTR.x, kTR.y, HAT_BROWN);
-  _t->fillTriangle(kBL.x, kBL.y, kTR.x, kTR.y, kTL.x, kTL.y, HAT_BROWN);
-  // Pinch dent — a darker crease down the crown center.
-  V2 dT = onFace(0, -36);
-  V2 dB = onFace(0, -14);
-  _t->drawLine(dT.x, dT.y, dB.x, dB.y, HAT_SH);
-  // Hatband — dark stripe around the base of the crown.
-  V2 hbL = onFace(-19, -13);
-  V2 hbR = onFace( 19, -13);
-  _t->drawLine(hbL.x, hbL.y, hbR.x, hbR.y, HAT_BAND);
-  _t->drawLine(hbL.x, hbL.y + 1, hbR.x, hbR.y + 1, HAT_BAND);
-  // Crown top highlight.
-  _t->drawLine(kTL.x, kTL.y, kTR.x, kTR.y, COAT_HI);
-}
-
-// Opaque human-style glasses — squarer than the aviator sunglasses, with a
-// heavy "trying too hard to look studious" frame. Rides the head front
-// plane and only draws when the front face is visible. When wired into a
-// Stage-5 everyday state this REPLACES the bot's own sunglasses (the
-// disguise is the headline final look, so it wins the conflict).
-static void drawHumanGlasses() {
-  if (!frontFaceVisible()) return;
-  // Big round "thick studious nerd" lenses sitting over the visor band. Round
-  // (not square) reads more comically + separates cleanly from the straight
-  // mustache below. Sized in raw px so they shrink on the mini via pkS().
-  V2 cL = onFace(-10, -4);   // left lens center (raised so the 'stache clears)
-  V2 cR = onFace( 10, -4);   // right lens center
-  int r = pkS(8); if (r < 3) r = 3;
-  // White "googly" lens fill so the eyes read as a disguise, not the bot's
-  // own black shades — the over-eager human look. Dark heavy frame around.
-  _t->fillCircle(cL.x, cL.y, r, SPECULAR);
-  _t->fillCircle(cR.x, cR.y, r, SPECULAR);
-  _t->drawCircle(cL.x, cL.y, r,     HAT_BAND);
-  _t->drawCircle(cL.x, cL.y, r + 1, HAT_BAND);
-  _t->drawCircle(cR.x, cR.y, r,     HAT_BAND);
-  _t->drawCircle(cR.x, cR.y, r + 1, HAT_BAND);
-  // Tiny dark "pupils" behind the lenses, parallax-shifted, so the disguise
-  // has shifty little eyes peering through.
-  int pr = pkS(2); if (pr < 1) pr = 1;
-  V2 pL = onFace(-10 + (float)_tiltX * 0.6f, -3);
-  V2 pR = onFace( 10 + (float)_tiltX * 0.6f, -3);
-  _t->fillCircle(pL.x, pL.y, pr, INK);
-  _t->fillCircle(pR.x, pR.y, pr, INK);
-  // Heavy nose bridge between the lenses.
-  V2 brL = onFace(-2, -4);
-  V2 brR = onFace( 2, -4);
-  _t->drawLine(brL.x, brL.y, brR.x, brR.y, HAT_BAND);
-  _t->drawLine(brL.x, brL.y + 1, brR.x, brR.y + 1, HAT_BAND);
-  // Temple arms running back toward the ears.
-  V2 tL = onFace(-24, -6);
-  V2 tR = onFace( 24, -6);
-  _t->drawLine(cL.x - r, cL.y - 1, tL.x, tL.y, HAT_BAND);
-  _t->drawLine(cR.x + r, cR.y - 1, tR.x, tR.y, HAT_BAND);
-  // Specular glints so the lenses read as glass, parallax-shifted.
-  V2 gL = onFace(-13 + (float)_tiltX, -7);
-  V2 gR = onFace(  7 + (float)_tiltX, -7);
-  _t->drawPixel(gL.x, gL.y, 0x52AA);
-  _t->drawPixel(gR.x, gR.y, 0x52AA);
-}
-
-// The "tell" — gr0m periodically over-acts being human with a flat speech
-// bubble ("HELLO HUMAN" / "I AM NORMAL"), and otherwise wears a stiff fake
-// smile so the disguise reads as unconvincing. The bubble cycles every few
-// seconds; between bubbles only the smile shows. Reuses drawSpeechBubble.
-static void drawHumanTell(uint32_t t) {
-  // ~2.6 s per phase at 5 fps; show a bubble ~40% of the time, then a beat
-  // of nothing so the over-acting feels intermittent rather than constant.
-  uint8_t phase = (t / 13) % 5;
-  if (phase == 0) {
-    drawSpeechBubble("HELLO HUMAN", INK);
-  } else if (phase == 2) {
-    drawSpeechBubble("I AM NORMAL", INK);
-  }
-  // Stiff fake smile BELOW the mustache (mustache bottom ≈ y13) — a too-wide
-  // flat grin with corners hitched up, on the front face. Only when the face
-  // is toward us, like the other face decorations.
-  if (!frontFaceVisible()) return;
-  V2 sL = onFace(-8, 17);
-  V2 sR = onFace( 8, 17);
-  V2 cL = onFace(-9, 15);    // corners hitched up — forced smile
-  V2 cR = onFace( 9, 15);
-  _t->drawLine(sL.x, sL.y, sR.x, sR.y, CHASSIS_SH);
-  _t->drawLine(sL.x, sL.y - 1, sR.x, sR.y - 1, CHASSIS_SH);
-  _t->drawLine(sL.x, sL.y, cL.x, cL.y, CHASSIS_SH);
-  _t->drawLine(sR.x, sR.y, cR.x, cR.y, CHASSIS_SH);
-}
-
-// Comically oversized fake mustache — the disguise's loudest "tell": a fat
-// black Groucho bush sitting clearly BELOW the glasses (with a chassis gap so
-// it doesn't merge into the lenses), swooping up into curled tips at both
-// ends, split by a notch under the nose so the two halves read as a 'stache.
-static void drawFakeMustache() {
-  if (!frontFaceVisible()) return;
-  // Main bush — a wide, fat slab. Top at y=8 (clear of the lens bottoms ~y=4,
-  // lenses centered at y=-4 with r=8), bottom at y=13. Two halves + a notch.
-  // Left half.
-  V2 lOut = onFace(-16, 8);    // outer-top, where the tip will curl up from
-  V2 lTop = onFace( -2, 9);    // inner-top (near the notch)
-  V2 lBot = onFace( -3, 13);   // inner-bottom
-  V2 lLow = onFace(-13, 13);   // outer-bottom
-  _t->fillTriangle(lOut.x, lOut.y, lTop.x, lTop.y, lBot.x, lBot.y, INK);
-  _t->fillTriangle(lOut.x, lOut.y, lBot.x, lBot.y, lLow.x, lLow.y, INK);
-  // Right half (mirror).
-  V2 rOut = onFace( 16, 8);
-  V2 rTop = onFace(  2, 9);
-  V2 rBot = onFace(  3, 13);
-  V2 rLow = onFace( 13, 13);
-  _t->fillTriangle(rOut.x, rOut.y, rTop.x, rTop.y, rBot.x, rBot.y, INK);
-  _t->fillTriangle(rOut.x, rOut.y, rBot.x, rBot.y, rLow.x, rLow.y, INK);
-  // Curled-up handlebar tips sweeping above the bush at both ends.
-  V2 lTip = onFace(-21, 4), lj = onFace(-15, 6);
-  V2 rTip = onFace( 21, 4), rj = onFace( 15, 6);
-  _t->fillTriangle(lOut.x, lOut.y, lj.x, lj.y, lTip.x, lTip.y, INK);
-  _t->fillTriangle(rOut.x, rOut.y, rj.x, rj.y, rTip.x, rTip.y, INK);
-}
-
-// One-call composite for the Stage-5 disguise everyday look. Order matters:
-// coat first (body layer), then the head gear over the chassis, then the
-// mustache + tell on top of everything.
+// One-call composite for the Stage-5 disguise everyday look. RECONCILED to
+// deployment/gr0m/SPEC.md #human-costume — the "AGI unconvincingly cosplaying
+// a human" gag. Forward-declared here; the canvas-faithful primitives +
+// drawHumanCostumeFull() composite live further down (after the onChest
+// helper they depend on), so this just trampolines to it. Keeps the
+// evoStage>=5 auto-render gating its callers already apply.
+static void drawHumanCostumeFull(uint32_t t, bool showBubble = true);
 static void drawHumanDisguise(uint32_t t) {
-  drawTrenchcoat();
-  drawFedora();
-  drawHumanGlasses();
-  drawFakeMustache();
-  drawHumanTell(t);
+  drawHumanCostumeFull(t);
 }
 
 // ════════════════════════════════════════════════════════════════════
-//   ALT HUMAN COSTUME — "undercover" easter egg (NOT the trench coat)
+//   HUMAN COSTUME PRIMITIVES — canvas-faithful Stage-5 disguise
 // ────────────────────────────────────────────────────────────────────
-//   A second, deliberately worse human disguise, distinct from the
-//   Stage-5 trench-coat-and-fedora look. Here gr0m pulls on a brown wig,
-//   straps a flesh-tone face mask (with painted-on human eyes + nose)
-//   over the visor, throws a knit hoodie over the chest plate, and clutches
-//   a takeaway coffee cup to "look busy / normal". It's bad on PURPOSE:
-//   the square robot head corners and chassis rivets still poke out past
-//   the mask + wig, and the mouth twitches between an awkward straight line
-//   and a too-eager smile every ~2 s.
+//   The six detail elements of deployment/gr0m/SPEC.md #human-costume,
+//   each one walked straight off the SVG in deployment/source/gr0m.jsx:
+//     • #human-wig       — brown wig sitting ASKEW (-3,+2, ~-4°) + cowlicks
+//     • #antenna-poke    — antenna piercing UP THROUGH the wig + LED halo
+//     • #human-face-mask — flesh mask, CYAN visor leak below the edge,
+//                          mismatched googly eyes, crooked marker brows,
+//                          painted-on red rictus + misaligned seam, and a
+//                          beard PEELING off the left with two falling chunks
+//     • #human-hoodie    — navy hoodie, "100% HUMAN" name badge, $19.99 RED
+//                          price tag dangling (-15°), drawstrings, pocket
+//     • #coffee-cup      — "FELLOW HUMAN BEAN" sleeve + rising steam
+//     • #human-bubble    — "BEEP BOOP FELLOW HUMAN" with a tail at the head
 //
-//   Geometry follows the existing 3D helpers so it tracks tilt like the
-//   rest of the character:
-//     • the wig + flesh mask + human eyes/nose/mouth ride the HEAD front
-//       plane (z = +22, via onFace) — they only render when the front face
-//       is toward us, so they vanish as the head turns away just like the
-//       visor and sunglasses do
-//     • the knit hoodie + V-neck + drawstrings ride the CHEST front plane
-//       (z = +12, via onChest) like the trench coat / brand bolt
-//     • the coffee cup is a held prop anchored beside the chest via rp()
-//       so it leans with the body
-//   Exposed below the namespace as gr0mRenderHumanCostume() — a standalone
-//   full-screen scene like the DJ booth, not an evolution-gated mood.
+//   The head elements (wig/mask/antenna-poke) ride the HEAD front plane via
+//   cvFace() and only render front-on, so they vanish as the head turns
+//   away just like the visor. The hoodie + coffee ride the CHEST front
+//   plane via cvChest() so they lean with the body. The bubble is a HUD
+//   overlay drawn in absolute screen space.
+//
+//   Two entry points share these primitives:
+//     • drawHumanDisguise()/drawHumanCostumeFull() — the evoStage>=5
+//       auto-render final form (mood states call it when stage>=5)
+//     • gr0mRenderHumanCostume() — the A+B manual full-screen toggle,
+//       a standalone scene like the DJ booth
 // ════════════════════════════════════════════════════════════════════
 
-// Costume palette (RGB565). Browns/flesh tones so the disguise reads as
-// fabric + skin against the cold brushed-steel chassis underneath.
+// Costume palette (RGB565) — reconciled exactly to deployment/gr0m/SPEC.md
+// #human-costume + deployment/source/gr0m.jsx HumanCostume defaults. Each
+// constant carries the source hex so the canvas remains the authority.
 static const uint16_t HC_SKIN     = 0xED90;  // #e8b386 flesh
-static const uint16_t HC_SKIN_SH  = 0xBC2B;  // #b8825a cheek / nose shadow
-static const uint16_t HC_HAIR     = 0x59C3;  // #5a3a1e warm brown wig (reads clearly as hair)
-static const uint16_t HC_HAIR_HI  = 0x8B0C;  // #8a5a30 lighter strand highlight
-static const uint16_t HC_HOODIE   = 0x39ED;  // #3a4a6b knit hoodie
+static const uint16_t HC_SKIN_SH  = 0xBC0B;  // #b8825a cheek / nose / mask-edge shadow
+static const uint16_t HC_HAIR     = 0x3923;  // #3a2418 brown wig + beard chunks
+static const uint16_t HC_HOODIE   = 0x3A4D;  // #3a4a6b navy knit hoodie
 static const uint16_t HC_HOODIE_DK= 0x29CB;  // #2a3858 pocket pouch
-static const uint16_t HC_HOODIE_LI= 0x5B51;  // #5a6a8b seam highlight / stitches
+static const uint16_t HC_HOODIE_LI= 0x5B51;  // #5a6a8b collar seam highlight
 static const uint16_t HC_HOODIE_TR= 0x1907;  // #1a2238 trim / hem
-static const uint16_t HC_STRING   = 0xCE59;  // drawstring cord
-static const uint16_t HC_MOUTH    = 0x79C3;  // #7a3818 painted mouth
-static const uint16_t HC_CUP       = 0xFFFF; // white takeaway cup
-static const uint16_t HC_CUP_LID   = 0x39C3; // brown lid / rim
-static const uint16_t HC_CUP_SLV   = 0xCCCD; // kraft sleeve
-static const uint16_t HC_STEAM     = 0xDEFB; // pale steam wisp
+static const uint16_t HC_STRING   = 0xCE79;  // #cccccc drawstring cord
+static const uint16_t HC_MOUTH    = 0xC9C7;  // #c83a3a painted-on red rictus smile
+static const uint16_t HC_SEAM     = 0x79C3;  // #7a3818 faint misaligned mouth seam + cup rim
+static const uint16_t HC_EYEBROW  = 0x1840;  // #1a0a04 marker eyebrows
+static const uint16_t HC_CUP       = 0xFFFF; // #ffffff takeaway cup body
+static const uint16_t HC_CUP_TOP   = 0x3923; // #3a2418 brown lid
+static const uint16_t HC_CUP_SLV   = 0xCCCD; // #c89a6a kraft sleeve
+static const uint16_t HC_CUP_SLVSH = 0x7A87; // #7a5238 sleeve shadow
+static const uint16_t HC_CUP_TXT   = 0x38C1; // #3a1a08 sleeve label ink
+static const uint16_t HC_STEAM     = 0xDEFB; // #dddddd pale steam wisp
+static const uint16_t HC_VISORLEAK = 0x05FF; // #00bdff CYAN visor light leak
+static const uint16_t HC_TAG       = 0xFFDC; // #fff8e0 price-tag stock
+static const uint16_t HC_TAG_TXT   = 0xC9C7; // #c83a3a "$19.99" in red
+static const uint16_t HC_TAG_STR   = 0x8C51; // #888888 tag string
+static const uint16_t HC_GREY      = 0x39C7; // #3a3a3a badge header / outlines
+static const uint16_t HC_ANT_LED   = 0xF943; // #ff2a1a antenna-poke LED (crimson)
 
-// Knit hoodie over the chest plate, with a hood draped behind the head, a
-// V-neck of skin showing, drawstrings, a kangaroo pocket, and sparse knit
-// stitches. Rides the chest front plane (onChest) so it leans with the body
-// like the trench coat. The hood "wings" use rp() so they splay either side
-// of the head and track tilt too.
-static void drawCostumeHoodie() {
-  // ── Hood drape behind the head ── two soft wings rising from the
-  // shoulders up past the head sides. Drawn first so the head + wig overlap.
-  // Built on the chest plane so they lean with the torso.
-  V2 hwL0 = onChest(-22, 26);   // left shoulder
-  V2 hwL1 = onChest(-30, 10);   // up the left of the head
-  V2 hwL2 = onChest(-14, 22);   // inner fold
-  V2 hwR0 = onChest( 22, 26);
-  V2 hwR1 = onChest( 30, 10);
-  V2 hwR2 = onChest( 14, 22);
-  _t->fillTriangle(hwL0.x, hwL0.y, hwL1.x, hwL1.y, hwL2.x, hwL2.y, HC_HOODIE_DK);
-  _t->fillTriangle(hwR0.x, hwR0.y, hwR1.x, hwR1.y, hwR2.x, hwR2.y, HC_HOODIE_DK);
+// Canvas→firmware mapping. The SVG authors every costume element in absolute
+// canvas pixels with the face center at (HX,HY)=(67,55). The 3D pipeline's
+// onFace()/onChest() take coordinates RELATIVE to that same center, so a
+// canvas point (cx,cy) on the head/chest front plane becomes onFace/onChest
+// (cx-67, cy-55). These wrappers keep the geometry below readable as the SVG.
+static inline V2 cvFace(float cx, float cy)  { return onFace (cx - 67.0f, cy - 55.0f); }
+static inline V2 cvChest(float cx, float cy) { return onChest(cx - 67.0f, cy - 55.0f); }
 
-  // ── Main body — broad knit panel over the chest front, a touch wider
-  // than the chest cube so it reads as draped fabric.
-  V2 tl = onChest(-24, 26);
-  V2 tr = onChest( 24, 26);
-  V2 br = onChest( 22, 52);
-  V2 bl = onChest(-22, 52);
-  _t->fillTriangle(tl.x, tl.y, tr.x, tr.y, br.x, br.y, HC_HOODIE);
-  _t->fillTriangle(tl.x, tl.y, br.x, br.y, bl.x, bl.y, HC_HOODIE);
-  // Collar seam highlight + hem trim.
-  _t->drawLine(tl.x, tl.y, tr.x, tr.y, HC_HOODIE_LI);
-  _t->drawLine(bl.x, bl.y, br.x, br.y, HC_HOODIE_TR);
+// ── #human-hoodie ───────────────────────────────────────────────────
+// Navy knit hoodie over the chest, hood drapes off the head sides, V-neck
+// of skin, drawstrings, kangaroo pocket, a white "100% HUMAN" name badge
+// (with a tiny ID photo), and a $19.99 RED price tag dangling from the
+// right hood drawstring (rotated ~-15°). Canvas: HumanHoodie in gr0m.jsx.
+// Rides the chest front plane (cvChest) so the whole thing leans with the
+// body, like the brand bolt. Drawstrings/badge/tag use cvFace where the
+// canvas anchors them near the head so they sit on the visible hood.
+static void drawHumanHoodie() {
+  // ── Hood drape: two wings off the sides of the head. SVG paths
+  //   left  M36,38 L30,78 L38,88 L38,78 Q40,50 50,42 Z
+  //   right M98,38 L104,78 L96,88 L96,78 Q94,50 84,42 Z
+  // The quadratic inner edge → a 2-triangle fan that hugs the head side.
+  V2 lA = cvChest(36, 38), lB = cvChest(30, 78), lC = cvChest(38, 88);
+  V2 lD = cvChest(38, 78), lE = cvChest(45, 48), lF = cvChest(50, 42);
+  _t->fillTriangle(lA.x, lA.y, lB.x, lB.y, lC.x, lC.y, HC_HOODIE);
+  _t->fillTriangle(lA.x, lA.y, lC.x, lC.y, lD.x, lD.y, HC_HOODIE);
+  _t->fillTriangle(lA.x, lA.y, lD.x, lD.y, lE.x, lE.y, HC_HOODIE);
+  _t->fillTriangle(lA.x, lA.y, lE.x, lE.y, lF.x, lF.y, HC_HOODIE);
+  V2 rA = cvChest(98, 38), rB = cvChest(104, 78), rC = cvChest(96, 88);
+  V2 rD = cvChest(96, 78), rE = cvChest(89, 48), rF = cvChest(84, 42);
+  _t->fillTriangle(rA.x, rA.y, rB.x, rB.y, rC.x, rC.y, HC_HOODIE);
+  _t->fillTriangle(rA.x, rA.y, rC.x, rC.y, rD.x, rD.y, HC_HOODIE);
+  _t->fillTriangle(rA.x, rA.y, rD.x, rD.y, rE.x, rE.y, HC_HOODIE);
+  _t->fillTriangle(rA.x, rA.y, rE.x, rE.y, rF.x, rF.y, HC_HOODIE);
 
-  // ── V-neck — triangle of skin showing at the collar.
-  V2 vL = onChest(-11, 26);
-  V2 vR = onChest( 11, 26);
-  V2 vB = onChest(  0, 36);
-  _t->fillTriangle(vL.x, vL.y, vR.x, vR.y, vB.x, vB.y, HC_SKIN);
-  _t->drawLine(vL.x, vL.y, vB.x, vB.y, HC_HOODIE_TR);
-  _t->drawLine(vR.x, vR.y, vB.x, vB.y, HC_HOODIE_TR);
+  // ── Body: rect (36,84) 62×26, fill hoodie. 1px highlight top + shadow bottom.
+  V2 btl = cvChest(36, 84), btr = cvChest(98, 84);
+  V2 bbr = cvChest(98, 110), bbl = cvChest(36, 110);
+  _t->fillTriangle(btl.x, btl.y, btr.x, btr.y, bbr.x, bbr.y, HC_HOODIE);
+  _t->fillTriangle(btl.x, btl.y, bbr.x, bbr.y, bbl.x, bbl.y, HC_HOODIE);
+  _t->drawLine(btl.x, btl.y, btr.x, btr.y, HC_HOODIE_LI);   // y=84 highlight
+  _t->drawLine(bbl.x, bbl.y, bbr.x, bbr.y, HC_HOODIE_TR);   // y=109 shadow
 
-  // ── Drawstrings dangling from the collar.
-  V2 dsL0 = onChest(-5, 36), dsL1 = onChest(-6, 44);
-  V2 dsR0 = onChest( 4, 36), dsR1 = onChest( 5, 43);
-  _t->drawLine(dsL0.x, dsL0.y, dsL1.x, dsL1.y, HC_STRING);
-  _t->drawLine(dsR0.x, dsR0.y, dsR1.x, dsR1.y, HC_STRING);
-  _t->fillCircle(dsL1.x, dsL1.y, pkS(1), HC_HOODIE_LI);
-  _t->fillCircle(dsR1.x, dsR1.y, pkS(1), HC_HOODIE_LI);
+  // ── V-neck: triangle of skin showing. SVG M56,84 L67,92 L78,84 Z
+  V2 vL = cvChest(56, 84), vB = cvChest(67, 92), vR = cvChest(78, 84);
+  _t->fillTriangle(vL.x, vL.y, vB.x, vB.y, vR.x, vR.y, HC_SKIN);
 
-  // ── Kangaroo pocket pouch across the lower front.
-  V2 pTL = onChest(-15, 44), pTR = onChest( 15, 44);
-  V2 pBR = onChest( 13, 50), pBL = onChest(-13, 50);
+  // ── Drawstrings: two 1px white lines + tip pixels. SVG (62,92)-(62,98),
+  //   (71,92)-(71,97). On the chest plane just under the V-neck.
+  V2 ds0 = cvChest(62, 92), ds1 = cvChest(62, 98);
+  V2 es0 = cvChest(71, 92), es1 = cvChest(71, 97);
+  _t->drawLine(ds0.x, ds0.y, ds1.x, ds1.y, HC_STRING);
+  _t->drawLine(es0.x, es0.y, es1.x, es1.y, HC_STRING);
+  _t->drawPixel(ds1.x, ds1.y, HC_HOODIE_LI);
+  _t->drawPixel(es1.x, es1.y, HC_HOODIE_LI);
+
+  // ── Pocket pouch: rect (50,100) 34×6, darker hoodie + 1px trim top.
+  V2 pTL = cvChest(50, 100), pTR = cvChest(84, 100);
+  V2 pBR = cvChest(84, 106), pBL = cvChest(50, 106);
   _t->fillTriangle(pTL.x, pTL.y, pTR.x, pTR.y, pBR.x, pBR.y, HC_HOODIE_DK);
   _t->fillTriangle(pTL.x, pTL.y, pBR.x, pBR.y, pBL.x, pBL.y, HC_HOODIE_DK);
   _t->drawLine(pTL.x, pTL.y, pTR.x, pTR.y, HC_HOODIE_TR);
 
-  // ── Sparse knit stitches — short diagonals across the body.
-  for (int i = 0; i < 5; i++) {
-    float x = -16.0f + i * 8.0f;
-    V2 a = onChest(x,        38);
-    V2 b = onChest(x + 3.0f, 42);
-    _t->drawLine(a.x, a.y, b.x, b.y, HC_HOODIE_LI);
+  // ── "100% HUMAN" name badge: white rect (37,94) 14×6 with a grey header
+  //   stripe (37,94 14×1.5), silkscreen text (too small to print legibly at
+  //   this scale → a 3px grey ID line stands in), and a tiny skin ID photo
+  //   (38,96) 3×3 with one brown pixel.
+  V2 bgTL = cvChest(37, 94), bgTR = cvChest(51, 94);
+  V2 bgBR = cvChest(51, 100), bgBL = cvChest(37, 100);
+  _t->fillTriangle(bgTL.x, bgTL.y, bgTR.x, bgTR.y, bgBR.x, bgBR.y, HC_CUP);
+  _t->fillTriangle(bgTL.x, bgTL.y, bgBR.x, bgBR.y, bgBL.x, bgBL.y, HC_CUP);
+  _t->drawLine(bgTL.x, bgTL.y, bgTR.x, bgTR.y, HC_GREY);              // header stripe
+  V2 idTL = cvChest(38, 96), idBR = cvChest(41, 99);                  // 3×3 photo
+  _t->fillRect(idTL.x, idTL.y, (idBR.x - idTL.x) > 0 ? idBR.x - idTL.x : 1,
+                               (idBR.y - idTL.y) > 0 ? idBR.y - idTL.y : 1, HC_SKIN);
+  V2 idDot = cvChest(39, 97);
+  _t->drawPixel(idDot.x, idDot.y, HC_HAIR);                           // brown hair pixel
+  V2 nameL = cvChest(43, 98), nameR = cvChest(50, 98);                // "100% HUMAN" stand-in
+  _t->drawLine(nameL.x, nameL.y, nameR.x, nameR.y, HC_GREY);
+
+  // ── $19.99 price tag dangling from the right drawstring, rotated -15°.
+  //   SVG <g translate(96 76) rotate(-15)> with the polygon (-2,2)(12,2)
+  //   (14,8)(-4,8) and a string up to (-1,-12). We pre-rotate the local
+  //   tag points by -15° about the (96,76) pivot, then map through cvChest.
+  {
+    const float ca = cosf(-0.2618f), sa = sinf(-0.2618f);  // -15°
+    auto tagPt = [&](float lx, float ly) -> V2 {
+      float rx = lx * ca - ly * sa, ry = lx * sa + ly * ca;
+      return cvChest(96.0f + rx, 76.0f + ry);
+    };
+    V2 strTop = tagPt(-1, -12), strBot = tagPt(4, 2);
+    _t->drawLine(strTop.x, strTop.y, strBot.x, strBot.y, HC_TAG_STR);
+    V2 q0 = tagPt(-2, 2), q1 = tagPt(12, 2), q2 = tagPt(14, 8), q3 = tagPt(-4, 8);
+    _t->fillTriangle(q0.x, q0.y, q1.x, q1.y, q2.x, q2.y, HC_TAG);
+    _t->fillTriangle(q0.x, q0.y, q2.x, q2.y, q3.x, q3.y, HC_TAG);
+    _t->drawLine(q0.x, q0.y, q1.x, q1.y, HC_GREY);
+    _t->drawLine(q3.x, q3.y, q2.x, q2.y, HC_GREY);
+    V2 hole = tagPt(-1, 3);
+    _t->drawPixel(hole.x, hole.y, HC_GREY);                 // string eyelet
+    // "$19.99" — too small to print; a short red bar across the tag stands in.
+    V2 t0 = tagPt(0, 6), t1 = tagPt(10, 6);
+    _t->drawLine(t0.x, t0.y, t1.x, t1.y, HC_TAG_TXT);
   }
 }
 
-// Flesh-tone face mask strapped over the visor: a skin slab with painted-on
-// human eyes (whites + brown pupils that shift a touch with tilt), a nose
-// shadow, brow lines, cheek shadows, and a mouth whose shape is the twitch
-// channel. Rides the head front plane (onFace) and only draws front-on.
-// `expr`: 1 = eager smile, 2 = awkward flat line (the ~2 s twitch pair).
-static void drawCostumeFaceMask(uint8_t expr) {
+// ── #human-face-mask ────────────────────────────────────────────────
+// Flesh mask over the visor with the disguise's loudest tells: a CYAN
+// visor light LEAKING out under the mask edge (y72-74), mismatched googly
+// eyes (left big r6, right small r4.5) with pupils pointing different ways,
+// crooked uneven marker eyebrows, a painted-on red rictus smile with a
+// faint misaligned brown mouth seam underneath, and a beard PEELING off the
+// left with two falling chunks. Canvas: HumanFaceMask. Front-face only.
+static void drawHumanFaceMask() {
   if (!frontFaceVisible()) return;
-  // Skin slab over the visor / lower face. Deliberately a hair too small for
-  // the square head, so the chassis corners + rivets still poke out — that's
-  // the joke. Two triangles so it skews with rotation.
-  V2 mTL = onFace(-19, -10);
-  V2 mTR = onFace( 19, -10);
-  V2 mBR = onFace( 17,  17);
-  V2 mBL = onFace(-17,  17);
-  _t->fillTriangle(mTL.x, mTL.y, mTR.x, mTR.y, mBR.x, mBR.y, HC_SKIN);
-  _t->fillTriangle(mTL.x, mTL.y, mBR.x, mBR.y, mBL.x, mBL.y, HC_SKIN);
+  // Mask body. SVG path M47,44 L46,71 Q67,79 89,71 L88,44 Q67,38 47,44 Z.
+  // The two quadratic curves (top brow + bottom chin) → triangle fans.
+  V2 a = cvFace(47, 44), b = cvFace(46, 71);          // left edge
+  V2 cQ = cvFace(67, 79);                             // bottom curve apex
+  V2 d = cvFace(89, 71), e = cvFace(88, 44);          // right edge / top-right
+  V2 tQ = cvFace(67, 38);                             // top curve apex
+  _t->fillTriangle(a.x, a.y, b.x, b.y, cQ.x, cQ.y, HC_SKIN);
+  _t->fillTriangle(a.x, a.y, cQ.x, cQ.y, d.x, d.y, HC_SKIN);
+  _t->fillTriangle(a.x, a.y, d.x, d.y, e.x, e.y, HC_SKIN);
+  _t->fillTriangle(a.x, a.y, e.x, e.y, tQ.x, tQ.y, HC_SKIN);
+  // Mask edge shadow stroke along the brow + chin curve.
+  _t->drawLine(a.x, a.y, b.x, b.y, HC_SKIN_SH);
+  _t->drawLine(b.x, b.y, cQ.x, cQ.y, HC_SKIN_SH);
+  _t->drawLine(cQ.x, cQ.y, d.x, d.y, HC_SKIN_SH);
+  _t->drawLine(d.x, d.y, e.x, e.y, HC_SKIN_SH);
 
-  // Cheek shadows for a little dimension.
-  V2 chL = onFace(-13, 8), chR = onFace(11, 8);
-  _t->fillCircle(chL.x, chL.y, pkS(2), HC_SKIN_SH);
-  _t->fillCircle(chR.x, chR.y, pkS(2), HC_SKIN_SH);
+  // ── CYAN VISOR LIGHT LEAKING BELOW the mask (y72-74). THIS IS CRUCIAL.
+  // SVG: (48,72) 1×2, (87,72) 1×2, (49,74) 3×1 in #00bdff (varying opacity →
+  // we drop the dim middle one a half-step toward visor-off for the falloff).
+  V2 lk0 = cvFace(48, 72), lk1 = cvFace(48, 73);
+  V2 lk2 = cvFace(87, 72), lk3 = cvFace(87, 73);
+  _t->drawPixel(lk0.x, lk0.y, HC_VISORLEAK);
+  _t->drawPixel(lk1.x, lk1.y, HC_VISORLEAK);
+  _t->drawPixel(lk2.x, lk2.y, HC_VISORLEAK);
+  _t->drawPixel(lk3.x, lk3.y, VISOR_OFF);       // dimmer right leak
+  V2 lkA = cvFace(49, 74), lkB = cvFace(52, 74);
+  _t->drawLine(lkA.x, lkA.y, lkB.x, lkB.y, HC_VISORLEAK);
 
-  // Brow lines above each eye.
-  V2 brL0 = onFace(-16, -6), brL1 = onFace(-5, -6);
-  V2 brR0 = onFace(  5, -6), brR1 = onFace(16, -6);
-  _t->drawLine(brL0.x, brL0.y, brL1.x, brL1.y, HC_SKIN_SH);
-  _t->drawLine(brR0.x, brR0.y, brR1.x, brR1.y, HC_SKIN_SH);
+  // ── Cheek shadows: two ellipses at (52,62) and (82,62), rx3 ry2.
+  V2 chL = cvFace(52, 62), chR = cvFace(82, 62);
+  _t->fillEllipse(chL.x, chL.y, pkS(3), pkS(2), HC_SKIN_SH);
+  _t->fillEllipse(chR.x, chR.y, pkS(3), pkS(2), HC_SKIN_SH);
 
-  // Human eyes — white sclera blocks with brown pupils that drift slightly
-  // with tilt (shifty disguise eyes), a dark outline, and a catchlight pixel.
-  float px = (float)_tiltX * 0.5f;
-  V2 eL = onFace(-10, -1), eR = onFace(10, -1);
-  int ew = pkS(6), eh = pkS(5); if (ew < 3) ew = 3; if (eh < 3) eh = 3;
-  _t->fillRect(eL.x - ew, eL.y - eh / 2, ew * 2, eh, HC_CUP);
-  _t->fillRect(eR.x - ew, eR.y - eh / 2, ew * 2, eh, HC_CUP);
-  _t->drawRect(eL.x - ew, eL.y - eh / 2, ew * 2, eh, HC_SKIN_SH);
-  _t->drawRect(eR.x - ew, eR.y - eh / 2, ew * 2, eh, HC_SKIN_SH);
-  V2 pL = onFace(-10 + px, -1), pR = onFace(10 + px, -1);
-  int pr = pkS(2); if (pr < 1) pr = 1;
-  _t->fillCircle(pL.x, pL.y, pr, HC_HAIR);
-  _t->fillCircle(pR.x, pR.y, pr, HC_HAIR);
-  _t->drawPixel(pL.x - 1, pL.y - 1, HC_CUP);
-  _t->drawPixel(pR.x - 1, pR.y - 1, HC_CUP);
+  // ── UNEVEN MARKER EYEBROWS: left (50,47) 11×1.5 + tail (49,48) 2×1,
+  //   right (73,48) 11×1.5 — deliberately at different heights.
+  V2 ebL0 = cvFace(50, 47), ebL1 = cvFace(61, 47);
+  V2 ebR0 = cvFace(73, 48), ebR1 = cvFace(84, 48);
+  _t->drawLine(ebL0.x, ebL0.y, ebL1.x, ebL1.y, HC_EYEBROW);
+  _t->drawLine(ebL0.x, ebL0.y + 1, ebL1.x, ebL1.y + 1, HC_EYEBROW);
+  _t->drawLine(ebR0.x, ebR0.y, ebR1.x, ebR1.y, HC_EYEBROW);
+  _t->drawLine(ebR0.x, ebR0.y + 1, ebR1.x, ebR1.y + 1, HC_EYEBROW);
+  V2 ebTail0 = cvFace(49, 48), ebTail1 = cvFace(51, 48);
+  _t->drawLine(ebTail0.x, ebTail0.y, ebTail1.x, ebTail1.y, HC_EYEBROW);
 
-  // Nose — a thin vertical shadow + a little nostril shelf.
-  V2 nT = onFace(0, 2), nB = onFace(0, 7);
+  // ── GOOGLY EYES — MISMATCHED. Left big (56,54) r6, right small (79,54)
+  //   r4.5. Pupils: left dropped down-left (53,57) r2.5, right up-right
+  //   (80.5,52.5) r2. White speck on each.
+  V2 elc = cvFace(56, 54), erc = cvFace(79, 54);
+  int elr = pkS(6), err = pkS(5); if (elr < 2) elr = 2; if (err < 2) err = 2;
+  _t->fillCircle(elc.x, elc.y, elr, HC_CUP);
+  _t->drawCircle(elc.x, elc.y, elr, INK);
+  _t->fillCircle(erc.x, erc.y, err, HC_CUP);
+  _t->drawCircle(erc.x, erc.y, err, INK);
+  V2 plc = cvFace(53, 57), prc = cvFace(81, 53);   // 80.5,52.5 rounded
+  int plr = pkS(3), prr = pkS(2); if (plr < 1) plr = 1; if (prr < 1) prr = 1;
+  _t->fillCircle(plc.x, plc.y, plr, INK);
+  _t->fillCircle(prc.x, prc.y, prr, INK);
+  V2 spL = cvFace(52, 55), spR = cvFace(80, 51);
+  _t->drawPixel(spL.x, spL.y, HC_CUP);
+  _t->drawPixel(spR.x, spR.y, HC_CUP);
+
+  // ── Crooked nose: rect (65,59) 2×4 + bridge pixel (64,62) wide shelf.
+  V2 nT = cvFace(66, 59), nB = cvFace(66, 63);
   _t->drawLine(nT.x, nT.y, nB.x, nB.y, HC_SKIN_SH);
-  V2 nL = onFace(-2, 7), nR = onFace(2, 7);
+  V2 nL = cvFace(64, 62), nR = cvFace(68, 62);
   _t->drawLine(nL.x, nL.y, nR.x, nR.y, HC_SKIN_SH);
 
-  // Mouth — the twitch channel. 1 = eager smile arc, else awkward flat line.
-  if (expr == 1) {
-    V2 sL = onFace(-8, 11), sC = onFace(0, 15), sR = onFace(8, 11);
-    _t->drawLine(sL.x, sL.y, sC.x, sC.y, HC_MOUTH);
-    _t->drawLine(sC.x, sC.y, sR.x, sR.y, HC_MOUTH);
-    _t->drawLine(sL.x, sL.y + 1, sC.x, sC.y + 1, HC_MOUTH);
-    _t->drawLine(sC.x, sC.y + 1, sR.x, sR.y + 1, HC_MOUTH);
-  } else {
-    V2 fL = onFace(-8, 12), fR = onFace(8, 12);
-    _t->drawLine(fL.x, fL.y, fR.x, fR.y, HC_MOUTH);
-    _t->drawLine(fL.x, fL.y + 1, fR.x, fR.y + 1, HC_MOUTH);
-    // tiny lopsided tic so the awkward beat reads as forced
-    V2 tic = onFace(-5, 13);
-    _t->drawPixel(tic.x, tic.y, HC_MOUTH);
-    _t->drawPixel(tic.x, tic.y + 1, HC_MOUTH);
-  }
+  // ── PAINTED-ON RED RICTUS SMILE. SVG M56,67 Q67,73 78,67 (red, 1.6px).
+  //   Quadratic → 4 chords through the Q control (67,73) midpoint sag.
+  V2 sm0 = cvFace(56, 67), sm1 = cvFace(62, 71), sm2 = cvFace(67, 72);
+  V2 sm3 = cvFace(72, 71), sm4 = cvFace(78, 67);
+  _t->drawLine(sm0.x, sm0.y, sm1.x, sm1.y, HC_MOUTH);
+  _t->drawLine(sm1.x, sm1.y, sm2.x, sm2.y, HC_MOUTH);
+  _t->drawLine(sm2.x, sm2.y, sm3.x, sm3.y, HC_MOUTH);
+  _t->drawLine(sm3.x, sm3.y, sm4.x, sm4.y, HC_MOUTH);
+  _t->drawLine(sm0.x, sm0.y + 1, sm2.x, sm2.y + 1, HC_MOUTH);  // ~1.6px weight
+  _t->drawLine(sm2.x, sm2.y + 1, sm4.x, sm4.y + 1, HC_MOUTH);
 
-  // Stubble shadow specks along the chin.
-  for (int i = -1; i <= 1; i++) {
-    V2 s = onFace(i * 5.0f, 16);
-    _t->drawPixel(s.x, s.y, HC_SKIN_SH);
-  }
+  // ── Faint MISALIGNED mouth seam underneath. SVG M58,68 Q67,71 76,68
+  //   (brown 0.5px) — shorter + offset so it doesn't line up with the smile.
+  V2 se0 = cvFace(58, 68), se1 = cvFace(67, 70), se2 = cvFace(76, 68);
+  _t->drawLine(se0.x, se0.y, se1.x, se1.y, HC_SEAM);
+  _t->drawLine(se1.x, se1.y, se2.x, se2.y, HC_SEAM);
+
+  // ── PEELING BEARD on the LEFT side. Two attached chunks (52,71) 6×3 +
+  //   (54,73) 2×2, plus TWO FALLING chunks rotated -15° @ (50,70) and
+  //   -25° @ (49,72). We map the falling chunks' rotated corners.
+  V2 bc0 = cvFace(52, 71), bc1 = cvFace(58, 74);
+  _t->fillRect(bc0.x, bc0.y, (bc1.x - bc0.x) > 0 ? bc1.x - bc0.x : 1,
+                             (bc1.y - bc0.y) > 0 ? bc1.y - bc0.y : 1, HC_HAIR);
+  V2 bc2 = cvFace(54, 73), bc3 = cvFace(56, 75);
+  _t->fillRect(bc2.x, bc2.y, (bc3.x - bc2.x) > 0 ? bc3.x - bc2.x : 1,
+                             (bc3.y - bc2.y) > 0 ? bc3.y - bc2.y : 1, HC_HAIR);
+  auto chunk = [&](float px, float py, float w, float h, float deg) {
+    const float ca = cosf(deg * 0.01745f), sa = sinf(deg * 0.01745f);
+    auto rot = [&](float lx, float ly) -> V2 {
+      float rx = lx * ca - ly * sa, ry = lx * sa + ly * ca;
+      return cvFace(px + rx, py + ry);
+    };
+    V2 q0 = rot(0, 0), q1 = rot(w, 0), q2 = rot(w, h), q3 = rot(0, h);
+    _t->fillTriangle(q0.x, q0.y, q1.x, q1.y, q2.x, q2.y, HC_HAIR);
+    _t->fillTriangle(q0.x, q0.y, q2.x, q2.y, q3.x, q3.y, HC_HAIR);
+  };
+  chunk(50, 70, 3, 2, -15);   // first falling chunk
+  chunk(49, 72, 2, 3, -25);   // second falling chunk, peeling further
 }
 
-// Brown wig wrapping the top + sides of the head. Rides the head front
-// plane so it tracks rotation; draws front-on only. Sits a little above the
-// chassis top so the square head edge still shows beneath the hairline.
-static void drawCostumeWig() {
+// ── #human-wig ──────────────────────────────────────────────────────
+// Brown wig sitting ASKEW: (-3,+2) px translate + ~-4° lean. Covers the top
+// + sides of the head with stray cowlick flicks on top. Canvas: HumanWig.
+// SVG main path M40,32 L40,50 L42,50 L43,42 L47,36 L55,33 L67,31 L79,33
+//   L86,36 L90,42 L91,50 L94,50 L94,32 Q70,22 40,32 Z (rotate -4° about
+//   67,35, translate -3,+2). Front-face only.
+static void drawHumanWig() {
   if (!frontFaceVisible()) return;
-  // Main wig mass — a broad band across the forehead. Sits a touch inside the
-  // square chassis top (y=-20) so the head's corners + rivets still show.
-  V2 wTL = onFace(-21, -20);
-  V2 wTR = onFace( 21, -20);
-  V2 wBR = onFace( 22,  -6);   // fringe drops down to the brow on the right
-  V2 wBL = onFace(-22,  -6);
-  _t->fillTriangle(wTL.x, wTL.y, wTR.x, wTR.y, wBR.x, wBR.y, HC_HAIR);
-  _t->fillTriangle(wTL.x, wTL.y, wBR.x, wBR.y, wBL.x, wBL.y, HC_HAIR);
-  // Rounded crown — a fat dome above the band so it reads as a head of hair,
-  // not a cap. Two triangles fanning up to a peaked top.
-  V2 cTL = onFace(-15, -30);
-  V2 cTR = onFace( 15, -30);
-  V2 cPk = onFace(  0, -33);
-  _t->fillTriangle(wTL.x, wTL.y, wTR.x, wTR.y, cTR.x, cTR.y, HC_HAIR);
-  _t->fillTriangle(wTL.x, wTL.y, cTR.x, cTR.y, cTL.x, cTL.y, HC_HAIR);
-  _t->fillTriangle(cTL.x, cTL.y, cTR.x, cTR.y, cPk.x, cPk.y, HC_HAIR);
-  // Sideburns down the temples (a few px thick).
-  V2 sbL0 = onFace(-21, -6), sbL1 = onFace(-20, 4);
-  V2 sbR0 = onFace( 21, -6), sbR1 = onFace( 20, 4);
-  for (int o = 0; o < 3; o++) {
-    _t->drawLine(sbL0.x + o, sbL0.y, sbL1.x + o, sbL1.y, HC_HAIR);
-    _t->drawLine(sbR0.x - o, sbR0.y, sbR1.x - o, sbR1.y, HC_HAIR);
+  // Pre-apply the askew transform in canvas space: rotate -4° about (67,35),
+  // then translate (-3,+2). wp() maps a wig-local canvas point onto the face.
+  const float ca = cosf(-0.0698f), sa = sinf(-0.0698f);  // -4°
+  auto wp = [&](float cx, float cy) -> V2 {
+    float dx = cx - 67.0f, dy = cy - 35.0f;
+    float rx = dx * ca - dy * sa, ry = dx * sa + dy * ca;
+    return cvFace(67.0f + rx - 3.0f, 35.0f + ry + 2.0f);
+  };
+  // Main mass: fan the outline from the crown apex (67,22, the Q control) so
+  // the curved top reads as a rounded hairline. Build the bottom hairline
+  // from the path's L-segments, sweeping left→right.
+  V2 apex = wp(67, 23);
+  static const float HL[][2] = {
+    {40,50},{42,50},{43,42},{47,36},{55,33},{67,31},
+    {79,33},{86,36},{90,42},{91,50},{94,50}
+  };
+  for (int i = 0; i + 1 < (int)(sizeof(HL)/sizeof(HL[0])); i++) {
+    V2 p0 = wp(HL[i][0],   HL[i][1]);
+    V2 p1 = wp(HL[i+1][0], HL[i+1][1]);
+    _t->fillTriangle(apex.x, apex.y, p0.x, p0.y, p1.x, p1.y, HC_HAIR);
   }
-  // Hairline fringe wisps — a jagged bottom edge so it isn't a flat block.
-  for (int x = -16; x <= 16; x += 5) {
-    V2 a = onFace((float)x, -6);
-    V2 b = onFace((float)x + 2, -2);
-    _t->drawLine(a.x, a.y, b.x, b.y, HC_HAIR);
+  // Close the rounded top: outer corners to the apex.
+  V2 oL = wp(40, 32), oR = wp(94, 32);
+  _t->fillTriangle(apex.x, apex.y, oL.x, oL.y, wp(40, 50).x, wp(40, 50).y, HC_HAIR);
+  _t->fillTriangle(apex.x, apex.y, oR.x, oR.y, wp(94, 50).x, wp(94, 50).y, HC_HAIR);
+  // Side tabs over the temples. SVG (42,48) 3×6 + (91,48) 3×6.
+  V2 stL0 = wp(42, 48), stL1 = wp(45, 54);
+  V2 stR0 = wp(91, 48), stR1 = wp(94, 54);
+  _t->fillRect(stL0.x, stL0.y, (stL1.x-stL0.x)>0?stL1.x-stL0.x:1, (stL1.y-stL0.y)>0?stL1.y-stL0.y:1, HC_HAIR);
+  _t->fillRect(stR0.x, stR0.y, (stR1.x-stR0.x)>0?stR1.x-stR0.x:1, (stR1.y-stR0.y)>0?stR1.y-stR0.y:1, HC_HAIR);
+  // Stray cowlick flicks on top — 4 positions per the SVG (last two fainter).
+  static const float COW[][2] = { {50,26},{51,25},{58,27},{80,27} };
+  for (int i = 0; i < 4; i++) {
+    V2 f0 = wp(COW[i][0], COW[i][1]);
+    V2 f1 = wp(COW[i][0], COW[i][1] - 3);
+    _t->drawLine(f0.x, f0.y, f1.x, f1.y, HC_HAIR);
   }
-  // A side part + a couple of stray highlight strands on the crown.
-  V2 pt0 = onFace(-4, -28), pt1 = onFace(-6, -12);
-  _t->drawLine(pt0.x, pt0.y, pt1.x, pt1.y, HC_HAIR_HI);
-  V2 hi0 = onFace(6, -26), hi1 = onFace(12, -20);
-  _t->drawLine(hi0.x, hi0.y, hi1.x, hi1.y, HC_HAIR_HI);
+  V2 cwa = wp(62, 28), cwb = wp(72, 28);   // two faint top flicks
+  _t->drawPixel(cwa.x, cwa.y, HC_HAIR);
+  _t->drawPixel(cwb.x, cwb.y, HC_HAIR);
 }
 
-// Takeaway coffee cup held beside the chest — completes the "just a normal
-// commuter" look. Anchored on the chest plane via onChest so it leans with
-// the body; a little steam wisps off the lid.
-static void drawCostumeCoffee(uint32_t t) {
-  // Cup body — a tapered white tube to the lower right of the chest.
-  V2 cTL = onChest(26, 36), cTR = onChest(36, 36);
-  V2 cBR = onChest(34, 52), cBL = onChest(28, 52);
+// ── #antenna-poke ───────────────────────────────────────────────────
+// The antenna shaft poking UP THROUGH the wig at top center, capped by an
+// LED ball with a halo glow. Canvas: AntennaPoke. SVG line (71,28)-(73,16),
+// LED circle r2 @ (73,16) with r3/r5 halo rings + a white speck (72,15).
+// Drawn AFTER the wig so the shaft visibly emerges through the hair.
+static void drawAntennaPoke(uint16_t led) {
+  if (!frontFaceVisible()) return;
+  V2 base = cvFace(71, 28), tip = cvFace(73, 16);
+  _t->drawLine(base.x, base.y, tip.x, tip.y, CHASSIS_SH);
+  _t->drawLine(base.x + 1, base.y, tip.x + 1, tip.y, CHASSIS_SH);
+  int lr = pkS(2); if (lr < 1) lr = 1;
+  _t->drawCircle(tip.x, tip.y, lr + 3, (led >> 2) & 0x39E7);   // outer halo (r5)
+  _t->drawCircle(tip.x, tip.y, lr + 1, (led >> 1) & 0x7BEF);   // inner halo (r3)
+  _t->fillCircle(tip.x, tip.y, lr, led);                       // LED ball (r2)
+  _t->drawCircle(tip.x, tip.y, lr, SPECULAR);
+  V2 spk = cvFace(72, 15);
+  _t->drawPixel(spk.x, spk.y, SPECULAR);                       // catchlight
+}
+
+// ── #coffee-cup ─────────────────────────────────────────────────────
+// White takeaway cup with a brown rim + side outlines, a kraft sleeve
+// labeled "FELLOW HUMAN BEAN", and rising steam. Canvas: CoffeeCup. The cup
+// rides the chest plane (cvChest) so it leans with the body. `t` animates
+// the steam. Cup body SVG (92,94) 10×14.
+static void drawCoffeeCup(const char* label, uint32_t t) {
+  // Body: rect (92,94) 10×14 white.
+  V2 cTL = cvChest(92, 94), cTR = cvChest(102, 94);
+  V2 cBR = cvChest(102, 108), cBL = cvChest(92, 108);
   _t->fillTriangle(cTL.x, cTL.y, cTR.x, cTR.y, cBR.x, cBR.y, HC_CUP);
   _t->fillTriangle(cTL.x, cTL.y, cBR.x, cBR.y, cBL.x, cBL.y, HC_CUP);
-  // Brown rim under the lid.
-  _t->drawLine(cTL.x, cTL.y, cTR.x, cTR.y, HC_CUP_LID);
-  _t->drawLine(cTL.x, cTL.y + 1, cTR.x, cTR.y + 1, HC_CUP_LID);
-  // Lid tab above the rim.
-  V2 lL = onChest(28, 33), lR = onChest(34, 33);
-  _t->drawLine(lL.x, lL.y, lR.x, lR.y, HC_CUP_LID);
-  V2 ltL = onChest(30, 31), ltR = onChest(32, 31);
-  _t->drawLine(ltL.x, ltL.y, ltR.x, ltR.y, HC_CUP_LID);
-  // Kraft sleeve band around the middle.
-  V2 svTL = onChest(26, 43), svTR = onChest(35, 43);
-  V2 svBR = onChest(34, 47), svBL = onChest(27, 47);
+  // Brown rim (92,94 10×2) + side outlines (91/102, 96, 1×10).
+  _t->drawLine(cTL.x, cTL.y, cTR.x, cTR.y, HC_CUP_TOP);
+  _t->drawLine(cTL.x, cTL.y + 1, cTR.x, cTR.y + 1, HC_CUP_TOP);
+  _t->drawLine(cTL.x, cTL.y, cBL.x, cBL.y, HC_SEAM);
+  _t->drawLine(cTR.x, cTR.y, cBR.x, cBR.y, HC_SEAM);
+  // Lid: (92,92) 10×2 + tab (95,91) 4×1.
+  V2 ldL = cvChest(92, 92), ldR = cvChest(102, 92);
+  _t->drawLine(ldL.x, ldL.y, ldR.x, ldR.y, HC_CUP_TOP);
+  V2 tbL = cvChest(95, 91), tbR = cvChest(99, 91);
+  _t->drawLine(tbL.x, tbL.y, tbR.x, tbR.y, HC_CUP_TOP);
+  // Kraft sleeve: (92,100) 10×4 + 1px shadow top, with the silkscreen label.
+  V2 svTL = cvChest(92, 100), svTR = cvChest(102, 100);
+  V2 svBR = cvChest(102, 104), svBL = cvChest(92, 104);
   _t->fillTriangle(svTL.x, svTL.y, svTR.x, svTR.y, svBR.x, svBR.y, HC_CUP_SLV);
   _t->fillTriangle(svTL.x, svTL.y, svBR.x, svBR.y, svBL.x, svBL.y, HC_CUP_SLV);
-  _t->drawLine(svTL.x, svTL.y, svTR.x, svTR.y, HC_CUP_LID);
-  // Steam — three short wisps rising + drifting (animated, anti-gravity).
+  _t->drawLine(svTL.x, svTL.y, svTR.x, svTR.y, HC_CUP_SLVSH);
+  // Sleeve label "FELLOW HUMAN BEAN" — silkscreen 2.4px on the canvas is far
+  // below the 6px ROM font, so we silkscreen the FIRST char as a label cue +
+  // a hint bar (full text would be unreadable at sprite scale).
+  if (label && label[0]) {
+    _t->setTextSize(1);
+    _t->setTextColor(HC_CUP_TXT, HC_CUP_SLV);
+    char cue[2] = { label[0], 0 };
+    _t->setCursor(svTL.x + 1, svTL.y - 1);
+    _t->print(cue);
+  }
+  // Steam: 3 dotted lines rising + drifting (anti-gravity wisps). SVG dots at
+  // x≈95/97/99, y85-90, varying opacity.
   for (int i = 0; i < 3; i++) {
     int phase = ((int)(t / 120) + i * 4) % 12;
-    V2 s = onChest(28.0f + i * 3.0f, 28.0f - phase);
+    V2 s = cvChest(95.0f + i * 2.0f, 90.0f - phase);
     if (s.y < 1) continue;
     _t->drawPixel(s.x, s.y, HC_STEAM);
     _t->drawPixel(s.x + ((phase & 1) ? 1 : -1), s.y - 1, HC_STEAM);
   }
 }
 
-// One-call composite for the alt costume. Order matters: hoodie (body layer)
-// behind, then the face mask over the visor, then the wig over the chassis
-// top, then the held coffee cup on top of everything.
-static void drawAltHumanCostume(uint32_t t, uint8_t expr) {
-  drawCostumeHoodie();
-  drawCostumeFaceMask(expr);
-  drawCostumeWig();
-  drawCostumeCoffee(t);
+// ── #human-bubble ───────────────────────────────────────────────────
+// "BEEP BOOP FELLOW HUMAN" speech bubble with a tail pointing back-left at
+// the head. Canvas: HumanBubble — white rounded rect at (8,14) w≈86 h11,
+// tail at (22-28,25-30). This is a HUD overlay (NOT on a 3D plane) so it is
+// drawn in absolute screen space, like drawSpeechBubble. Clamps to width.
+static void drawHumanBubble(const char* text) {
+  int len = 0; while (text && text[len]) len++;
+  int w = len * 6 + 6;            // 6px ROM font, vs the canvas's 4.5px silkscreen
+  if (w > 132) w = 132;
+  int x = 2, y = 14;
+  _t->fillRoundRect(x, y, w, 12, 2, SPECULAR);
+  _t->drawRoundRect(x, y, w, 12, 2, INK);
+  // Tail pointing down-left back toward the head (canvas tail at x+14..x+20).
+  int tx = x + 14;
+  _t->fillTriangle(tx, y + 11, tx + 6, y + 11, tx + 4, y + 16, SPECULAR);
+  _t->drawLine(tx, y + 11, tx + 4, y + 16, INK);
+  _t->drawLine(tx + 6, y + 11, tx + 4, y + 16, INK);
+  _t->setTextSize(1);
+  _t->setTextColor(INK, SPECULAR);
+  _t->setCursor(x + 3, y + 3);
+  if (text) _t->print(text);
 }
 
-// Alt-costume scene body — composed onto whatever surface _t points at.
-// Called from the global trampoline below (which sets _t = tgt first).
-// Draws the base bot first (so the square head corners + rivets peek out
-// past the disguise), then layers the costume. The mouth twitches between
-// awkward (2) and smile (1) every ~2 s; `t` is millis().
+// ── #human-costume ──────────────────────────────────────────────────
+// The Stage-5 endgame composite — AGI cosplaying a human. Composed BACK TO
+// FRONT exactly as the canvas: hoodie → face mask → wig → antenna-poke →
+// coffee → bubble. All six detail elements render together. Mirrors the
+// HumanCostume defaults (coffee/bubble/price-tag/antenna all on).
+static void drawHumanCostumeFull(uint32_t t, bool showBubble) {
+  drawHumanHoodie();                                 // 4. hoodie + badge + price tag
+  drawHumanFaceMask();                               // 3. mask + visor leak + googly eyes + beard
+  drawHumanWig();                                    // 1. wig askew + cowlicks
+  drawAntennaPoke(HC_ANT_LED);                       // 2. antenna poking UP THROUGH the wig
+  drawCoffeeCup("FELLOW HUMAN BEAN", t);             // 5. coffee cup
+  if (showBubble)                                    // 6. speech bubble (suppressed
+    drawHumanBubble("BEEP BOOP FELLOW HUMAN");       //    in attention to keep the "!" alert)
+}
+
+// Human-costume scene body (the A+B manual toggle target) — composed onto
+// whatever surface _t points at. Called from the global trampoline below
+// (which sets _t = tgt first). Draws the base bot first (so the square head
+// corners + rivets peek out past the disguise and the cyan visor can leak
+// below the mask edge), then layers the full canvas costume. `t` is millis().
 static void humanCostumeScene(uint32_t t) {
   _t = buddyTarget();
   readTilt();
@@ -1828,11 +1801,11 @@ static void humanCostumeScene(uint32_t t) {
   drawBolt3D(VISOR_IDLE);
   drawNeck3D();
   drawHead3D();
-  drawVisor3D(VISOR_IDLE);   // visor under the mask — peeks at the head edges
-  drawAntenna3D(0);
-  // Costume on top. ~2 s twitch: 2000 ms per half-cycle.
-  uint8_t expr = ((t / 2000) & 1) ? 1 : 2;   // 1 smile, 2 awkward
-  drawAltHumanCostume(t, expr);
+  drawVisor3D(VISOR_IDLE);   // cyan visor under the mask — leaks below the edge
+  drawAntenna3D(0);          // base antenna stub; the poke pierces the wig on top
+  // Costume on top — the full canvas composite (hoodie → mask → wig →
+  // antenna-poke → coffee → bubble).
+  drawHumanCostumeFull(t);
   // A faint mood wisp for atmosphere, like the other scenes.
   drawMoodParticles(t, 2, 2);
 }
@@ -2117,15 +2090,10 @@ static void doAttention(uint32_t t) {
   if (evoStage() < 5) drawSunglasses3D();   // disguise glasses replace these at Stage 5
   drawMouth3D(4);                     // O shout
   drawAntenna3D(pulse ? VISOR_ALERT : 0);
-  // Stage 5 (Ascended): final form. Wear the coat/fedora/glasses but keep
-  // the alarm "!" bubble (below) as the attention tell so we don't stack two
-  // bubbles — the disguise's own "HELLO HUMAN" bubble would fight the alert.
-  // drawHumanTell() (which carries that bubble) is intentionally skipped here.
-  if (evoStage() >= 5) {
-    drawTrenchcoat();
-    drawFedora();
-    drawHumanGlasses();
-  }
+  // Stage 5 (Ascended): final form — the human costume. Keep the alarm "!"
+  // bubble (below) as the attention tell, so suppress the costume's own
+  // "BEEP BOOP FELLOW HUMAN" bubble here to avoid stacking two bubbles.
+  if (evoStage() >= 5) drawHumanCostumeFull(t, /*showBubble=*/false);
   drawMoodParticles(t, 5, 1);
   // Stage 4 (HUD): the alert speech bubble unlocks — blinks on alternate ticks.
   // Below HUD the attention mood still renders (red visor + "!" mouth), bare.
@@ -2201,11 +2169,12 @@ void gr0mRenderDJ(TFT_eSPI* tgt, uint32_t t) {
   gr0m::djScene(t);
 }
 
-// Alt human-costume easter-egg entry point — global so the main loop can
-// call it without touching the gr0m namespace internals. Points the
-// namespace's active render surface at `tgt` (mirrors gr0mRenderDJ), then
-// composes the scene. `t` is millis(). No trigger is wired here — the caller
-// decides when to show it.
+// Human-costume manual-toggle entry point (the A+B full-screen scene) —
+// global so the main loop can call it without touching the gr0m namespace
+// internals. Points the namespace's active render surface at `tgt` (mirrors
+// gr0mRenderDJ), then composes the full canvas costume scene. `t` is millis().
+// Wired to the A+B button combo in main.cpp; renders the same six-element
+// disguise as the evoStage>=5 auto-render.
 void gr0mRenderHumanCostume(TFT_eSPI* tgt, uint32_t t) {
   gr0m::_t = tgt;
   gr0m::humanCostumeScene(t);
