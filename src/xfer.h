@@ -179,10 +179,17 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
-  // Set the displayed token counter (period usage / reset), driven by the
-  // bridge daemon. {"cmd":"tokens","set":N}
+  // Usage push from the bridge daemon. set=period figure (chest-LCD),
+  // life=lifetime (drives level + evolution stage), ok/deny=approvals/denials
+  // this period. Missing fields keep their current value (back-compatible with
+  // an older daemon that only sends "set").
+  //   {"cmd":"tokens","set":N,"life":N,"ok":N,"deny":N}
   if (strcmp(cmd, "tokens") == 0) {
-    if (doc["set"].is<uint32_t>()) statsSetTokens(doc["set"].as<uint32_t>());
+    uint32_t period = doc["set"]  | stats().tokens;
+    uint32_t life   = doc["life"] | stats().lifetimeTokens;
+    uint16_t ok     = (uint16_t)(doc["ok"]   | (int)stats().okCount);
+    uint16_t no     = (uint16_t)(doc["deny"] | (int)stats().noCount);
+    statsSetTokens(period, life, ok, no);
     _xAck("tokens", true);
     return true;
   }

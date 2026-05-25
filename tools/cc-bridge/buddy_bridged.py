@@ -14,10 +14,13 @@ over one of four transports, chosen by environment:
 
 Unix socket ~/.cache/claude-buddy/buddy.sock, one JSON line per req/resp:
   {"op":"prompt","tool":..,"hint":..,"src":..,"timeout":..} -> {"decision":..}
-  {"op":"status"}                 -> {connected, device, tokens, period}
+  {"op":"status"}                 -> {connected, device, transport,
+                                      periodTokens, lifetimeTokens, level,
+                                      evoStage, approved, denied, period}
   {"op":"send","cmd":{...}}       -> forward a raw command to the device
-  {"op":"token","action":"reset"} -> zero the usage counter
+  {"op":"token","action":"reset"} -> zero the period counter + approved/denied
   {"op":"token","action":"period","value":"day|week|month|all"}
+  {"op":"token","action":"level_reset"} -> zero the lifetime baseline
 """
 from __future__ import annotations
 
@@ -43,6 +46,9 @@ PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 HEARTBEAT_S = 10
 DEFAULT_PROMPT_TIMEOUT_S = 30
+
+# Evolution stage milestones (lifetime tokens → stage)
+_EVO_MILESTONES = [250_000_000, 100_000_000, 25_000_000, 5_000_000, 1_000_000]
 
 
 def log(msg: str) -> None:
@@ -70,6 +76,14 @@ def _period_start(period: str) -> float:
     return midnight.timestamp()
 
 
+def _evo_stage(lifetime: int) -> int:
+    """Map lifetime token count to evolution stage 0–5."""
+    for stage, milestone in enumerate(reversed(_EVO_MILESTONES), start=1):
+        if lifetime >= milestone:
+            return stage
+    return 0
+
+
 class BuddyLink:
     def __init__(self) -> None:
         self.pending: dict[str, asyncio.Future[str]] = {}
@@ -94,6 +108,18 @@ class BuddyLink:
         # Token reporting state (persisted across restarts).
         self._period = os.environ.get("BUDDY_TOKEN_PERIOD", "day")
         self._reset_ts = 0.0
+
+        # Lifetime token tracking: cached total of all-time output tokens from
+        # transcripts.  Computed once at startup, then incremented from deltas.
+        # _lifetime_baseline is subtracted so "level_reset" can zero the display
+        # without losing the underlying history.
+        self._lifetime_cached: int = 0          # raw all-time total (from scan)
+        self._lifetime_baseline: int = 0        # subtract for displayed value
+        self._lifetime_scanned: bool = False    # True after the initial scan
+
+        # Approved/denied tally: list of {"ts": float, "decision": "approved"|"denied"}
+        self._decision_log: list[dict] = []
+
         self._load_state()
 
     # ── token usage ─────────────────────────────────────────────────
@@ -103,15 +129,53 @@ class BuddyLink:
             d = json.load(STATE_PATH.open())
             self._period = d.get("period", self._period)
             self._reset_ts = float(d.get("reset_ts", 0.0))
+            self._lifetime_baseline = int(d.get("lifetime_baseline", 0))
+            self._decision_log = list(d.get("decision_log", []))
         except Exception:
             pass
 
     def _save_state(self) -> None:
         try:
-            STATE_PATH.write_text(json.dumps(
-                {"period": self._period, "reset_ts": self._reset_ts}))
+            STATE_PATH.write_text(json.dumps({
+                "period": self._period,
+                "reset_ts": self._reset_ts,
+                "lifetime_baseline": self._lifetime_baseline,
+                "decision_log": self._decision_log,
+            }))
         except Exception:
             pass
+
+    def _scan_all_lifetime_tokens(self) -> int:
+        """Sum output_tokens across ALL JSONL transcripts (called once at startup)."""
+        total = 0
+        try:
+            for p in PROJECTS_DIR.glob("*/*.jsonl"):
+                try:
+                    with p.open("r", errors="replace") as f:
+                        for line in f:
+                            if '"output_tokens"' not in line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                            except Exception:
+                                continue
+                            usage = (obj.get("message") or {}).get("usage") or {}
+                            total += int(usage.get("output_tokens", 0) or 0)
+                except OSError:
+                    continue
+        except Exception:
+            pass
+        return total
+
+    def ensure_lifetime_scanned(self) -> None:
+        """Scan all transcripts once at startup to seed the lifetime cache."""
+        if self._lifetime_scanned:
+            return
+        self._lifetime_cached = self._scan_all_lifetime_tokens()
+        self._lifetime_scanned = True
+        log(f"lifetime token scan complete: {self._lifetime_cached} raw "
+            f"(baseline={self._lifetime_baseline}, "
+            f"display={self._lifetime_cached - self._lifetime_baseline})")
 
     def period_tokens(self) -> int:
         """Output tokens across transcripts in the current window, since the
@@ -151,10 +215,63 @@ class BuddyLink:
             pass
         return total
 
-    def token_reset(self) -> None:
-        self._reset_ts = datetime.now(timezone.utc).timestamp()
+    def lifetime_tokens(self) -> int:
+        """Displayed lifetime tokens = raw all-time total minus baseline.
+
+        The raw total is computed once at startup and held in memory; we do NOT
+        re-scan every heartbeat.  Any new session tokens are captured the next
+        time ensure_lifetime_scanned is called (on reconnect / startup).
+        """
+        ensure_called = self._lifetime_scanned  # avoid side-effect in property
+        if not ensure_called:
+            self.ensure_lifetime_scanned()
+        displayed = max(0, self._lifetime_cached - self._lifetime_baseline)
+        return displayed
+
+    def approved_denied(self) -> tuple[int, int]:
+        """Count approved/denied decisions within the current period window."""
+        start = max(_period_start(self._period), self._reset_ts)
+        ok = 0
+        deny = 0
+        for entry in self._decision_log:
+            if not isinstance(entry, dict):
+                continue
+            if float(entry.get("ts", 0.0)) < start:
+                continue
+            decision = entry.get("decision", "")
+            if decision == "approved":
+                ok += 1
+            elif decision == "denied":
+                deny += 1
+        return ok, deny
+
+    def _record_decision(self, decision: str) -> None:
+        """Append a resolved prompt decision to the in-memory log and persist."""
+        self._decision_log.append({
+            "ts": datetime.now(timezone.utc).timestamp(),
+            "decision": decision,
+        })
+        # Trim very old entries (older than 31 days) to keep the file bounded.
+        cutoff = datetime.now(timezone.utc).timestamp() - 32 * 86400
+        self._decision_log = [
+            e for e in self._decision_log
+            if isinstance(e, dict) and float(e.get("ts", 0.0)) >= cutoff
+        ]
         self._save_state()
-        log("token usage reset")
+
+    def token_reset(self) -> None:
+        """Zero the period baseline and clear the approved/denied tally."""
+        self._reset_ts = datetime.now(timezone.utc).timestamp()
+        self._decision_log = []
+        self._save_state()
+        log("token usage reset (period + approved/denied cleared)")
+
+    def level_reset(self) -> None:
+        """Set lifetime_baseline = current raw total so displayed life → 0."""
+        self.ensure_lifetime_scanned()
+        self._lifetime_baseline = self._lifetime_cached
+        self._save_state()
+        log(f"level reset: baseline set to {self._lifetime_baseline}")
 
     def token_period(self, period: str) -> bool:
         if period not in ("day", "week", "month", "all"):
@@ -214,7 +331,17 @@ class BuddyLink:
             log(f"write failed: {exc}")
 
     async def push_tokens(self) -> None:
-        await self._send_json({"cmd": "tokens", "set": self.period_tokens()})
+        """Push the full heartbeat token payload to the device."""
+        period = self.period_tokens()
+        life = self.lifetime_tokens()
+        ok, deny = self.approved_denied()
+        await self._send_json({
+            "cmd": "tokens",
+            "set": period,
+            "life": life,
+            "ok": ok,
+            "deny": deny,
+        })
 
     def _feed(self, data: bytes) -> None:
         self._rx_buf.extend(data)
@@ -237,6 +364,24 @@ class BuddyLink:
         if msg.get("cmd") == "status":
             await self._send_json({"ack": "status", "ok": True,
                                    "data": {"name": "claude-code-bridge", "sec": False}})
+            return
+        # Device → daemon control events (from the on-device Usage menu).
+        evt = msg.get("evt")
+        if evt == "period":
+            value = msg.get("value", "")
+            if self.token_period(str(value)):
+                log(f"device evt: period -> {value}")
+                await self.push_tokens()
+            return
+        if evt == "token_reset":
+            self.token_reset()
+            log("device evt: token_reset")
+            await self.push_tokens()
+            return
+        if evt == "level_reset":
+            self.level_reset()
+            log("device evt: level_reset")
+            await self.push_tokens()
             return
         ack = msg.get("ack")
         if ack:
@@ -407,11 +552,15 @@ class BuddyLink:
         })
         log(f"-> device prompt {pid}: {tool} / {hint!r}")
         try:
-            return await asyncio.wait_for(fut, timeout=timeout_s)
+            decision = await asyncio.wait_for(fut, timeout=timeout_s)
         except asyncio.TimeoutError:
             self.pending.pop(pid, None)
             await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
             return "timeout"
+        # Record the decision in the approved/denied tally.
+        if decision in ("approved", "denied"):
+            self._record_decision(decision)
+        return decision
 
     async def heartbeat_loop(self) -> None:
         while True:
@@ -442,8 +591,23 @@ async def handle_client(link: BuddyLink, reader, writer) -> None:
             writer.write(b'{"error":"bad json"}\n'); await writer.drain(); return
         op = req.get("op")
         if op == "status":
-            resp = {"connected": link.is_connected(), "device": link.device_name,
-                    "tokens": link.period_tokens(), "period": link._period}
+            period_tokens = link.period_tokens()
+            life = link.lifetime_tokens()
+            ok, deny = link.approved_denied()
+            resp = {
+                "connected": link.is_connected(),
+                "device": link.device_name,
+                "transport": link.transport,
+                "periodTokens": period_tokens,
+                "lifetimeTokens": life,
+                "level": life // 50_000,
+                "evoStage": _evo_stage(life),
+                "approved": ok,
+                "denied": deny,
+                "period": link._period,
+                # Legacy field kept for backward compatibility.
+                "tokens": period_tokens,
+            }
             writer.write((json.dumps(resp) + "\n").encode())
         elif op == "prompt":
             decision = await link.request_prompt(
@@ -468,12 +632,31 @@ async def handle_client(link: BuddyLink, reader, writer) -> None:
             action = req.get("action")
             if action == "reset":
                 link.token_reset(); await link.push_tokens()
-                writer.write((json.dumps({"ok": True, "tokens": link.period_tokens()}) + "\n").encode())
+                ok_c, deny_c = link.approved_denied()
+                writer.write((json.dumps({
+                    "ok": True,
+                    "tokens": link.period_tokens(),
+                    "approved": ok_c,
+                    "denied": deny_c,
+                }) + "\n").encode())
             elif action == "period":
-                ok = link.token_period(str(req.get("value", "")))
-                if ok: await link.push_tokens()
-                writer.write((json.dumps({"ok": ok, "period": link._period,
-                                          "tokens": link.period_tokens()}) + "\n").encode())
+                ok_flag = link.token_period(str(req.get("value", "")))
+                if ok_flag: await link.push_tokens()
+                ok_c, deny_c = link.approved_denied()
+                writer.write((json.dumps({
+                    "ok": ok_flag,
+                    "period": link._period,
+                    "tokens": link.period_tokens(),
+                    "approved": ok_c,
+                    "denied": deny_c,
+                }) + "\n").encode())
+            elif action == "level_reset":
+                link.level_reset(); await link.push_tokens()
+                writer.write((json.dumps({
+                    "ok": True,
+                    "lifetimeTokens": link.lifetime_tokens(),
+                    "level": link.lifetime_tokens() // 50_000,
+                }) + "\n").encode())
             else:
                 writer.write(b'{"error":"bad token action"}\n')
         else:
@@ -501,6 +684,10 @@ async def serve_socket(link: BuddyLink) -> None:
 
 async def main() -> None:
     link = BuddyLink()
+    # Seed the lifetime token cache eagerly at startup so the first heartbeat
+    # has accurate data.  This is a one-time full scan; subsequent heartbeats
+    # use the cached value.
+    link.ensure_lifetime_scanned()
 
     def _shutdown(*_a):
         log("shutdown — closing")

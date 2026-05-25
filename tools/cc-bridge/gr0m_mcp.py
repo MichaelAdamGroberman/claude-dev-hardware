@@ -8,12 +8,17 @@ It is a thin client of the buddy_bridged daemon's Unix socket
 daemon is using (serial / BLE / WiFi). No third-party packages required.
 
 Tools:
-  gr0m_status                       battery/mode/uptime + token usage
+  gr0m_status                       connection, transport, battery, token usage,
+                                    level, evoStage (0–5), lifetime tokens,
+                                    approved/denied counts, and reporting period
   gr0m_notify(message)              show a line on the device screen
   gr0m_set_radio(mode)              wifi | bt | off  (reboots the device)
   gr0m_set_owner(name)              on-screen owner name
-  gr0m_token_reset()                zero the usage counter
+  gr0m_token_reset()                zero the period counter + approved/denied tally
   gr0m_token_period(period)         day | week | month | all
+  gr0m_level_reset()                reset the lifetime-token baseline (life → 0,
+                                    character visually de-evolves to Stage 0)
+  gr0m_dj(on)                       toggle DJ mode on the device
 """
 import json
 import socket
@@ -24,30 +29,106 @@ SOCK_PATH = Path.home() / ".cache" / "claude-buddy" / "buddy.sock"
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [
-    {"name": "gr0m_status", "description": "Get the gr0m device status: connection, transport, battery, and token usage for the current period.",
+    {"name": "gr0m_status",
+     "description": (
+         "Get the gr0m device status: connection state, transport, battery, and "
+         "token usage. Returns periodTokens (usage in the current reporting window), "
+         "lifetimeTokens (all-time output tokens minus any level reset), level "
+         "(lifetimeTokens // 50000, monotonically climbing), evoStage (0–5 based on "
+         "lifetime milestones 1M/5M/25M/100M/250M — drives the character's visual "
+         "evolution), approved and denied (permission-prompt counts in the current "
+         "window), and period (the active reporting window: day/week/month/all)."
+     ),
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "gr0m_notify", "description": "Show a short message on the gr0m device screen.",
-     "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
-    {"name": "gr0m_set_radio", "description": "Set the device radio mode (mutually exclusive). Reboots the device.",
-     "inputSchema": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["wifi", "bt", "off"]}}, "required": ["mode"]}},
-    {"name": "gr0m_set_owner", "description": "Set the on-screen owner name shown on the device.",
-     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
-    {"name": "gr0m_token_reset", "description": "Reset (zero) the device's token-usage counter for the current period.",
+    {"name": "gr0m_notify",
+     "description": "Show a short message on the gr0m device screen.",
+     "inputSchema": {"type": "object",
+                     "properties": {"message": {"type": "string"}},
+                     "required": ["message"]}},
+    {"name": "gr0m_set_radio",
+     "description": "Set the device radio mode (mutually exclusive). Reboots the device.",
+     "inputSchema": {"type": "object",
+                     "properties": {"mode": {"type": "string",
+                                             "enum": ["wifi", "bt", "off"]}},
+                     "required": ["mode"]}},
+    {"name": "gr0m_set_owner",
+     "description": "Set the on-screen owner name shown on the device.",
+     "inputSchema": {"type": "object",
+                     "properties": {"name": {"type": "string"}},
+                     "required": ["name"]}},
+    {"name": "gr0m_token_reset",
+     "description": (
+         "Reset (zero) the device's token-usage counter for the current period "
+         "and clear the approved/denied tally. The lifetime counter is unaffected."
+     ),
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "gr0m_token_period", "description": "Set the token-usage reporting window shown on the device.",
-     "inputSchema": {"type": "object", "properties": {"period": {"type": "string", "enum": ["day", "week", "month", "all"]}}, "required": ["period"]}},
-    {"name": "gr0m_gpio_read", "description": "Read a digital GPIO pin. Allowed pins: 0, 25, 26, 32, 33, 36.",
-     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}}, "required": ["pin"]}},
-    {"name": "gr0m_gpio_write", "description": "Drive a GPIO pin high/low (sets it to OUTPUT). Allowed pins: 0, 25, 26, 32, 33.",
-     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}, "value": {"type": "integer", "enum": [0, 1]}}, "required": ["pin", "value"]}},
-    {"name": "gr0m_gpio_mode", "description": "Set a pin's mode before reading/writing.",
-     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}, "mode": {"type": "string", "enum": ["input", "output", "pullup"]}}, "required": ["pin", "mode"]}},
-    {"name": "gr0m_adc_read", "description": "Analog read a pin, returns raw (0-4095) and millivolts. ADC-capable pins: 32, 33, 36.",
-     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}}, "required": ["pin"]}},
-    {"name": "gr0m_logic_capture", "description": "Mini logic-analyzer: sample one pin at a fixed interval and return the bit trace (hex) plus the actual elapsed time. Up to 512 samples.",
-     "inputSchema": {"type": "object", "properties": {"pin": {"type": "integer"}, "samples": {"type": "integer"}, "interval_us": {"type": "integer"}}, "required": ["pin"]}},
-    {"name": "gr0m_adapter", "description": "Toggle adapter mode: strip the desk-pet UI/mic so the device is a dedicated GPIO/logic probe. In-memory only — a device reset returns it to normal BT/WiFi pet mode.",
-     "inputSchema": {"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]}},
+    {"name": "gr0m_token_period",
+     "description": "Set the token-usage reporting window shown on the device.",
+     "inputSchema": {"type": "object",
+                     "properties": {"period": {"type": "string",
+                                               "enum": ["day", "week", "month", "all"]}},
+                     "required": ["period"]}},
+    {"name": "gr0m_level_reset",
+     "description": (
+         "Reset the lifetime-token baseline so that lifetimeTokens reads 0 and "
+         "climbs again from the current moment. This visually de-evolves the "
+         "character to Stage 0 (Spark) on the device. The underlying token history "
+         "is preserved in the transcripts — only the display baseline changes. "
+         "Use with care; the on-device equivalent requires a tap-twice confirm."
+     ),
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "gr0m_dj",
+     "description": (
+         "Toggle DJ mode on the gr0m device. When on=true, the device renders a "
+         "full DJ booth scene (gr0m on the decks, turntables, mixer, VU meter, "
+         "note particles, ~124 BPM beat). DJ mode is mutually exclusive with "
+         "adapter mode. In-memory only — a device reset returns it to normal mode."
+     ),
+     "inputSchema": {"type": "object",
+                     "properties": {"on": {"type": "boolean"}},
+                     "required": ["on"]}},
+    {"name": "gr0m_gpio_read",
+     "description": "Read a digital GPIO pin. Allowed pins: 0, 25, 26, 32, 33, 36.",
+     "inputSchema": {"type": "object",
+                     "properties": {"pin": {"type": "integer"}},
+                     "required": ["pin"]}},
+    {"name": "gr0m_gpio_write",
+     "description": "Drive a GPIO pin high/low (sets it to OUTPUT). Allowed pins: 0, 25, 26, 32, 33.",
+     "inputSchema": {"type": "object",
+                     "properties": {"pin": {"type": "integer"},
+                                    "value": {"type": "integer", "enum": [0, 1]}},
+                     "required": ["pin", "value"]}},
+    {"name": "gr0m_gpio_mode",
+     "description": "Set a pin's mode before reading/writing.",
+     "inputSchema": {"type": "object",
+                     "properties": {"pin": {"type": "integer"},
+                                    "mode": {"type": "string",
+                                             "enum": ["input", "output", "pullup"]}},
+                     "required": ["pin", "mode"]}},
+    {"name": "gr0m_adc_read",
+     "description": "Analog read a pin, returns raw (0-4095) and millivolts. ADC-capable pins: 32, 33, 36.",
+     "inputSchema": {"type": "object",
+                     "properties": {"pin": {"type": "integer"}},
+                     "required": ["pin"]}},
+    {"name": "gr0m_logic_capture",
+     "description": (
+         "Mini logic-analyzer: sample one pin at a fixed interval and return the "
+         "bit trace (hex) plus the actual elapsed time. Up to 512 samples."
+     ),
+     "inputSchema": {"type": "object",
+                     "properties": {"pin": {"type": "integer"},
+                                    "samples": {"type": "integer"},
+                                    "interval_us": {"type": "integer"}},
+                     "required": ["pin"]}},
+    {"name": "gr0m_adapter",
+     "description": (
+         "Toggle adapter mode: strip the desk-pet UI/mic so the device is a "
+         "dedicated GPIO/logic probe. In-memory only — a device reset returns it "
+         "to normal BT/WiFi pet mode."
+     ),
+     "inputSchema": {"type": "object",
+                     "properties": {"on": {"type": "boolean"}},
+                     "required": ["on"]}},
 ]
 
 
@@ -90,6 +171,14 @@ def _call_tool(name: str, args: dict) -> str:
         return json.dumps(_daemon({"op": "token", "action": "reset"}))
     if name == "gr0m_token_period":
         return json.dumps(_daemon({"op": "token", "action": "period", "value": args.get("period", "day")}))
+    if name == "gr0m_level_reset":
+        return json.dumps(_daemon({"op": "token", "action": "level_reset"}))
+    if name == "gr0m_dj":
+        on = bool(args.get("on", True))
+        r = _daemon({"op": "send", "cmd": {"cmd": "dj", "on": on}})
+        if r.get("ok"):
+            return "DJ mode ON — gr0m is on the decks" if on else "DJ mode OFF"
+        return json.dumps(r)
     if name == "gr0m_gpio_read":
         return json.dumps(_daemon({"op": "query", "ack": "gpio",
             "cmd": {"cmd": "gpio", "act": "read", "pin": int(args.get("pin", -1))}}))
@@ -138,7 +227,7 @@ def main() -> None:
             _send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "gr0m", "version": "1.0.0"}}})
+                "serverInfo": {"name": "gr0m", "version": "1.1.0"}}})
         elif method == "tools/list":
             _send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
         elif method == "tools/call":

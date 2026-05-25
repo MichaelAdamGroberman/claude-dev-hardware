@@ -69,6 +69,12 @@ bool     screenOff = false;
 bool     swallowBtnA = false;
 bool     swallowBtnB = false;
 bool     buddyMode = false;
+
+// Mirrors read by gr0m.cpp each frame — stats.h state is file-static and can't
+// be shared across translation units, so the renderer reads these instead of
+// stats() (which would be a stale, never-updated copy in gr0m.cpp).
+uint8_t  g_evoStage   = 0;   // = evoStage()
+uint32_t g_dispTokens = 0;   // = stats().tokens (period figure for the chest-LCD)
 bool     gifAvailable = false;
 const uint8_t SPECIES_GIF = 0xFF;   // species NVS sentinel: use the installed GIF
 
@@ -1729,6 +1735,8 @@ void loop() {
   // by the bridge. Pet sleeps underneath. Exit restores Y via
   // applyDisplayMode() so the next mode-switch isn't visually offset.
   clockRefreshRtc();   // 1Hz internal throttle; also caches _onUsb
+  g_evoStage   = evoStage();      // refresh the mirrors gr0m.cpp renders from
+  g_dispTokens = stats().tokens;
   // Show the clock when nothing is happening — bridge heartbeat alone
   // doesn't count as activity (it's the only way to get the RTC synced).
   bool clocking = displayMode == DISP_NORMAL

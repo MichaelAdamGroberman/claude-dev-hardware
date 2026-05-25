@@ -18,13 +18,25 @@ struct Stats {
   uint16_t velocity[8];      // ring buffer: seconds-to-respond per approval
   uint8_t  velIdx;
   uint8_t  velCount;
-  uint8_t  level;
-  uint32_t tokens;          // cumulative output tokens, drives level
+  uint8_t  level;            // = lifetimeTokens / TOKENS_PER_LEVEL
+  uint32_t tokens;           // PERIOD usage shown on the chest-LCD (daemon-driven, in-memory, resettable)
+  uint32_t lifetimeTokens;   // monotonic lifetime usage — drives level + evoStage (persisted on stage-up)
+  uint16_t okCount;          // approvals this period (daemon-driven display counter)
+  uint16_t noCount;          // denials this period (daemon-driven display counter)
+};
+
+// Character evolution milestones (lifetime tokens). The gr0m mascot assembles
+// itself stage by stage as lifetime usage crosses these. Kept in sync with the
+// daemon's evoStage() and the design spec.
+static const uint32_t EVO_MILESTONES[5] = {
+  1000000UL, 5000000UL, 25000000UL, 100000000UL, 250000000UL
 };
 
 static Stats _stats;
 static Preferences _prefs;
 static bool _dirty = false;
+
+static bool _djUnlocked = false;   // sticky once the character reaches Stage 5
 
 inline void statsLoad() {
   _prefs.begin("buddy", true);
@@ -33,16 +45,21 @@ inline void statsLoad() {
   _stats.denials    = _prefs.getUShort("deny", 0);
   _stats.velIdx     = _prefs.getUChar("vidx", 0);
   _stats.velCount   = _prefs.getUChar("vcnt", 0);
+  // Lifetime tokens drive the level + evolution stage. The legacy "tok" key
+  // held the same cumulative figure, so we keep reading it for continuity.
+  _stats.lifetimeTokens = _prefs.getUInt("tok", 0);
   _stats.level      = _prefs.getUChar("lvl", 0);
-  _stats.tokens     = _prefs.getUInt("tok", 0);
+  _djUnlocked       = _prefs.getBool("djunlk", false);
   size_t got = _prefs.getBytes("vel", _stats.velocity, sizeof(_stats.velocity));
   if (got != sizeof(_stats.velocity)) memset(_stats.velocity, 0, sizeof(_stats.velocity));
   _prefs.end();
-  // Level is derived from tokens; if NVS has level set but tokens at 0,
-  // backfill so the derivation holds.
-  if (_stats.tokens == 0 && _stats.level > 0) {
-    _stats.tokens = (uint32_t)_stats.level * TOKENS_PER_LEVEL;
+  // Backfill lifetime from a stored level if needed, then derive level from it.
+  if (_stats.lifetimeTokens == 0 && _stats.level > 0) {
+    _stats.lifetimeTokens = (uint32_t)_stats.level * TOKENS_PER_LEVEL;
   }
+  _stats.level  = _stats.lifetimeTokens / TOKENS_PER_LEVEL;
+  _stats.tokens = 0;   // period figure — daemon pushes the real value
+  _stats.okCount = _stats.noCount = 0;
 }
 
 inline void statsSave() {
@@ -54,7 +71,8 @@ inline void statsSave() {
   _prefs.putUChar("vidx", _stats.velIdx);
   _prefs.putUChar("vcnt", _stats.velCount);
   _prefs.putUChar("lvl", _stats.level);
-  _prefs.putUInt("tok", _stats.tokens);
+  _prefs.putUInt("tok", _stats.lifetimeTokens);   // lifetime drives level/evo
+  _prefs.putBool("djunlk", _djUnlocked);
   _prefs.putBytes("vel", _stats.velocity, sizeof(_stats.velocity));
   _prefs.end();
   _dirty = false;
@@ -171,7 +189,7 @@ inline uint8_t statsEnergyTier() {
 }
 
 inline uint8_t statsFedProgress() {
-  return (uint8_t)((_stats.tokens % TOKENS_PER_LEVEL) / (TOKENS_PER_LEVEL / 10));
+  return (uint8_t)((_stats.lifetimeTokens % TOKENS_PER_LEVEL) / (TOKENS_PER_LEVEL / 10));
 }
 
 // --- Settings --------------------------------------------------------------
@@ -270,11 +288,55 @@ inline Settings& settings() { return _settings; }
 
 inline const Stats& stats() { return _stats; }
 
-// Set the displayed token counter directly (in-memory only — NOT persisted,
-// so no NVS wear from frequent updates). The bridge daemon drives this with
-// per-period usage (day/week/month) and can zero it on reset. Level follows
-// so the chest bolt / stats screen stay consistent.
-inline void statsSetTokens(uint32_t t) {
-  _stats.tokens = t;
-  _stats.level  = t / TOKENS_PER_LEVEL;
+// Evolution stage 0..5 from lifetime usage crossing EVO_MILESTONES.
+inline uint8_t evoStage() {
+  uint8_t s = 0;
+  for (uint8_t i = 0; i < 5; i++)
+    if (_stats.lifetimeTokens >= EVO_MILESTONES[i]) s = i + 1;
+  return s;
+}
+
+// Lifetime tokens at the NEXT milestone, or 0 if fully evolved (Stage 5).
+inline uint32_t evoNextMilestone() {
+  uint8_t s = evoStage();
+  return (s < 5) ? EVO_MILESTONES[s] : 0;
+}
+
+inline bool statsDjUnlocked() { return _djUnlocked; }
+
+// Push usage from the bridge daemon. In-memory, EXCEPT lifetime is persisted
+// when the evolution stage advances (rare → negligible NVS wear) so a reboot
+// lands on the right stage. period → chest-LCD; life → level + evoStage;
+// ok/no → approvals/denials this period.
+inline void statsSetTokens(uint32_t period, uint32_t life, uint16_t ok, uint16_t no) {
+  _stats.tokens  = period;
+  _stats.okCount = ok;
+  _stats.noCount = no;
+  uint8_t stageBefore = evoStage();
+  uint8_t lvlBefore   = _stats.level;
+  _stats.lifetimeTokens = life;
+  _stats.level          = life / TOKENS_PER_LEVEL;
+  if (_stats.level > lvlBefore) _levelUpPending = true;   // celebrate on level-up
+  uint8_t stageAfter = evoStage();
+  if (stageAfter != stageBefore) {
+    if (stageAfter == 5 && !_djUnlocked) _djUnlocked = true;   // DJ bonus unlocked
+    _dirty = true; statsSave();
+  }
+}
+
+// Reset the PERIOD counters (token usage + approved/denied) shown on-device.
+// The daemon holds the authoritative baseline; this zeroes the local display
+// immediately for snappy feedback.
+inline void statsResetCounters() {
+  _stats.tokens = 0;
+  _stats.okCount = _stats.noCount = 0;
+}
+
+// Reset the buddy LEVEL — wipe lifetime progress so the character de-evolves to
+// Stage 0. Persisted immediately. The daemon's lifetime baseline is reset in
+// parallel (level_reset event) so it won't re-push the old total.
+inline void statsResetLevel() {
+  _stats.lifetimeTokens = 0;
+  _stats.level = 0;
+  _dirty = true; statsSave();
 }

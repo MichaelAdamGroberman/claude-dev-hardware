@@ -5,7 +5,17 @@
 
 extern TFT_eSprite spr;
 
+// Owned by main.cpp. stats.h keeps its state file-static (can't be shared
+// across translation units), so gr0m reads these mirrors instead of stats(),
+// which would be a separate, never-updated copy in this .cpp.
+extern uint8_t  g_evoStage;     // 0..5 character evolution stage
+extern uint32_t g_dispTokens;   // period token figure for the chest-LCD
+
 namespace gr0m {
+
+// Current evolution stage — gates which body parts / decorations are drawn so
+// the character visibly assembles itself as lifetime usage grows.
+static inline uint8_t evoStage() { return ::g_evoStage; }
 
 // Active render surface — refreshed at the top of each state function via
 // buddyTarget(). In portrait/home/peek modes this is `&spr` (the off-
@@ -281,10 +291,14 @@ static void drawCube3D(V3 center, float sx, float sy, float sz,
     { 0, 1, 5, 4,  0, -1,  0 },  // top (y=-sy in our coord system)
     { 6, 7, 3, 2,  0,  1,  0 },  // bottom
   };
+  // Stages 0-3 are flat-shaded (single base color per face) for a deliberately
+  // primitive look; dynamic per-face lighting unlocks at Stage 4 (HUD).
+  bool flat = evoStage() < 4;
   for (int f = 0; f < 6; f++) {
-    uint8_t lit = faceLighting(faces[f].nx, faces[f].ny, faces[f].nz);
-    drawQuad3D(v[faces[f].a], v[faces[f].b], v[faces[f].c], v[faces[f].d],
-               shade(baseColor, lit), edge);
+    uint16_t fill = flat
+        ? baseColor
+        : shade(baseColor, faceLighting(faces[f].nx, faces[f].ny, faces[f].nz));
+    drawQuad3D(v[faces[f].a], v[faces[f].b], v[faces[f].c], v[faces[f].d], fill, edge);
   }
 }
 
@@ -353,17 +367,20 @@ static void drawHead3D() {
 // 3D chest cube — smaller, sits below the head. Front face hosts the
 // lightning-bolt brand logo. Lit dynamically like the head.
 static void drawChest3D() {
+  if (evoStage() < 1) return;            // Stage 1 (Frame): torso appears
   drawCube3D({0, 36, 0}, 22.0f, 9.0f, 12.0f, CHASSIS, CHASSIS_SH);
 }
 
 // Small 3D neck cube between head and chest. Doesn't need lighting
 // detail — small enough to read as a connector.
 static void drawNeck3D() {
+  if (evoStage() < 1) return;            // Stage 1 (Frame): neck connector
   drawCube3D({0, 23, 0}, 4.0f, 4.0f, 4.0f, CHASSIS_SH, CHASSIS_SH);
 }
 
 // 3D antenna — pole rising from top of head with a glowing LED ball.
 static void drawAntenna3D(uint16_t ledColor) {
+  if (evoStage() < 2) return;            // Stage 2 (Powered): antenna up
   V3 base = { 0, -22, 0 };
   V3 tip  = { 0, -36, 0 };
   drawPole3D(base, tip, CHASSIS_SH);
@@ -381,6 +398,7 @@ static void drawAntenna3D(uint16_t ledColor) {
 // 3D joint — pole sticking out the mouth area on the front face.
 // Only renders when the front face is visible (joint is "in front of" the head).
 static void drawJoint3D(uint32_t t, bool lit) {
+  if (evoStage() < 3) return;            // Stage 3 (Persona): the joint
   if (!frontFaceVisible()) return;
   // Object-space: emerges from front face (z = +22) near mouth (y = 14).
   // Extends forward AND right, slight droop with gravity.
@@ -432,6 +450,7 @@ static void drawVisor3D(uint16_t color) {
 // filled circles. The circles don't squash to ellipses (would require
 // projected-disc rendering), but their POSITIONS track the rotation.
 static void drawSunglasses3D() {
+  if (evoStage() < 3) return;            // Stage 3 (Persona): shades on
   if (!frontFaceVisible()) return;
   V2 lL = onFace(-12, -1);
   V2 lR = onFace( 12, -1);
@@ -459,6 +478,7 @@ static void drawSunglasses3D() {
 
 // 3D mouth — small projected shape on the front face.
 static void drawMouth3D(int mood) {
+  if (evoStage() < 1) return;            // Stage 1 (Frame): gains a mouth
   if (!frontFaceVisible()) return;
   V2 mL = onFace(-8, 14);
   V2 mR = onFace( 8, 14);
@@ -505,6 +525,7 @@ static void drawMouth3D(int mood) {
 // 3D lightning bolt on the chest's front face. Object-space y = +36
 // (chest center), z = +12 (chest front plane).
 static void drawBolt3D(uint16_t fill) {
+  if (evoStage() < 2) return;            // Stage 2 (Powered): brand bolt lights
   // Check the chest's front face is visible (same check as head front)
   if (!frontFaceVisible()) return;
   V3 chestFront = { 0, 0, 12 };  // we'll add chest center y inline
@@ -783,6 +804,7 @@ static void drawJointInMouth(uint32_t t, bool lit, int yOff) {
 // Also follows the joint tip's drop angle so the smoke trail starts
 // at the actual ember position.
 static void drawSmokeFromMouth(uint32_t t, int intensity, int yOff) {
+  if (evoStage() < 3) return;            // Stage 3 (Persona): smoke
   if (buddyScale() == 1) return;
   if (intensity <= 0) return;
   int fx = faceOffX();
@@ -912,6 +934,7 @@ static void drawDiscardedJoint(uint32_t t) {
 // Hearts → leaves. Hearts rise on the left, morphing to green leaves
 // at the half-life of their flight.
 static void drawMoodParticles(uint32_t t, int n, int speed) {
+  if (evoStage() < 4) return;            // Stage 4 (HUD): mood particles
   if (buddyScale() == 1) return;
   const int LIFECYCLE = 28;
   const int MORPH = LIFECYCLE / 2;
@@ -1135,6 +1158,7 @@ static void drawHeartCloud(uint32_t t) {
 // Opt-in via settings (e.g. settings.chestLcd = true). text is ≤4 chars
 // to fit in the 20×11 inset.
 static void drawChestLCD(const char* text) {
+  if (evoStage() < 4) return;            // Stage 4 (HUD): chest readout
   int lx = HX - 11, ly = HY + 30;
   int lw = 22, lh = 11;
   _t->fillRect(lx - 1, ly - 1, lw + 2, lh + 2, INK);
@@ -1184,7 +1208,7 @@ static void doIdle(uint32_t t) {
     // Source is stats().tokens (NVS-backed cumulative), not tama.tokens —
     // TamaState carries the live BLE feed, not the persistent counter.
     char buf[8];
-    uint32_t v = stats().tokens;
+    uint32_t v = ::g_dispTokens;   // period figure mirrored from main.cpp
     if (v >= 1000000)   snprintf(buf, sizeof(buf), "%luM", v / 1000000);
     else if (v >= 1000) snprintf(buf, sizeof(buf), "%luK", v / 1000);
     else                snprintf(buf, sizeof(buf), "%lu", (unsigned long)v);
