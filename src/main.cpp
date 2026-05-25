@@ -38,6 +38,38 @@ const int LED_PIN = 10;          // red LED, active-low
 const uint16_t HOT   = 0xFA20;   // red-orange: warnings, impatience, deny
 const uint16_t PANEL = 0x2104;   // overlay panel background
 
+// ── Design-system palette (screens.jsx) ──────────────────────────────────
+// RGB565 of the canvas hex tokens. Names mirror the design so a screen body
+// reads close to the JSX. These are FIXED accent colors (independent of the
+// per-character Palette tint) so every screen reads consistently across
+// buddy skins, exactly as the canvas intends.
+const uint16_t DS_WHITE   = 0xFFFF;   // #ffffff white values
+const uint16_t DS_BLACK   = 0x0000;   // #000000 bg / text-on-accent
+const uint16_t DS_DIM     = 0x7C32;   // #7a8492 dim labels
+const uint16_t DS_GREEN   = 0x2EAB;   // #29d65b status ok / busy / encrypted
+const uint16_t DS_ORANGE  = 0xFC63;   // #ff8c1a selection highlight / accent
+const uint16_t DS_CYAN    = 0x05FF;   // #00bdff idle status / passkey border
+const uint16_t DS_RED     = 0xF943;   // #ff2a1a alarm
+const uint16_t DS_AMBER   = 0xFEA1;   // #ffd60a charging / adapter / evolution
+const uint16_t DS_PINK    = 0xF972;   // #ff2d92 stage-up ascended / DJ
+const uint16_t DS_REDSOFT = 0xFB6B;   // #ff6e5b denied / destructive value
+const uint16_t DS_GRNSOFT = 0x5FEF;   // #5cff7a cancel action fg
+const uint16_t DS_LINE    = 0x18E3;   // #1a1c1e hairline dividers / borders
+const uint16_t DS_PANEL   = 0x0882;   // #0e1014 inset chip background
+const uint16_t DS_HEADER  = 0x18C4;   // #181a22 menu header strip bg
+const uint16_t DS_HDRBORD = 0x2967;   // #2a2f3a menu header bottom border
+const uint16_t DS_OFFBAR  = 0x2146;   // #262a32 empty mini-bar outline
+const uint16_t DS_OFFDOT  = 0x39E9;   // #3a3f48 empty mini-dot outline
+const uint16_t DS_PASSHDR = 0x19CD;   // #1a3a6b passkey header bg
+const uint16_t DS_DARK    = 0x0861;   // #0a0c0e darkest inset / footer bg
+const uint16_t DS_CFMBG   = 0x1821;   // #1a0408 destructive-confirm bg
+const uint16_t DS_CFMHDR  = 0xC9C7;   // #c83a3a destructive-confirm header
+const uint16_t DS_DENYBG  = 0x3841;   // #3a0a08 deny/reset action bg
+const uint16_t DS_CXLBG   = 0x0943;   // #0a2a18 cancel action bg
+const uint16_t DS_ADPHDR  = 0x3941;   // #3a2a08 adapter header bg
+const uint16_t DS_SUTOP   = 0x1846;   // #1a0832 stage-up gradient top
+const uint16_t DS_SUBOT   = 0x0801;   // #08020a stage-up gradient bottom
+
 enum PersonaState { P_SLEEP, P_IDLE, P_BUSY, P_ATTENTION, P_CELEBRATE, P_DIZZY, P_HEART };
 const char* stateNames[] = { "sleep", "idle", "busy", "attention", "celebrate", "dizzy", "heart" };
 
@@ -310,6 +342,108 @@ static void applyReset(uint8_t idx) {
   ESP.restart();
 }
 
+// ── Design-system shared draw helpers (screens.jsx atoms) ─────────────────
+// Small pixel-aligned primitives reused across the redesigned screens, ported
+// from the JSX DotIcon / BatteryIcon / MiniDots / MiniBars atoms. All draw
+// into the global `spr` sprite at the given top-left/anchor.
+
+// Status dot — a solid filled circle, optional soft halo ring (the JSX
+// boxShadow). Used in headers and the BT/adapter status lines.
+static void drawStatusDot(int cx, int cy, uint16_t col, int r = 3, bool halo = true) {
+  if (halo) spr.drawCircle(cx, cy, r + 1, col);
+  spr.fillCircle(cx, cy, r, col);
+}
+
+// Battery glyph: outlined shell + terminal nub + colored fill bar. Mirrors the
+// JSX BatteryIcon — fill width tracks pct, color steps red/amber/green. Drawn
+// from top-left (x,y); total footprint is (w+3) × h. Returns nothing.
+static void drawBatteryGlyph(int x, int y, uint8_t pct, int w = 18, int h = 9) {
+  if (pct > 100) pct = 100;
+  uint16_t col = (pct < 15) ? DS_RED : (pct < 35) ? DS_ORANGE : DS_GREEN;
+  spr.drawRect(x, y, w, h, DS_DIM);                 // shell outline
+  spr.fillRect(x + w, y + 2, 2, h - 4, DS_DIM);     // terminal nub
+  int fillW = ((w - 4) * pct) / 100;
+  if (fillW < 1) fillW = 1;
+  spr.fillRect(x + 2, y + 2, fillW, h - 4, col);    // fill bar
+}
+
+// Header strip — the home-screen top bar: "gr0m" (white, size 1 bold-ish) on
+// the left; a status dot + state label (colored) + battery glyph on the right;
+// a hairline divider underneath. Drawn into the top `H_STRIP` px of the screen.
+// `pct` 0..100; `stateCol`/`stateLbl` carry the IDLE(cyan)/BUSY(green) state.
+const int H_STRIP = 22;
+static void drawHeaderStrip(const char* stateLbl, uint16_t stateCol, uint8_t pct) {
+  spr.fillRect(0, 0, W, H_STRIP, DS_BLACK);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_WHITE, DS_BLACK);
+  spr.setCursor(6, 4);
+  spr.print("gr0m");
+  // Right cluster, laid out right-to-left: battery (18+3 wide) | state | dot.
+  int bx = W - 6 - 21;
+  drawBatteryGlyph(bx, 4, pct);
+  int slen = strlen(stateLbl);
+  int sx = bx - 6 - slen * 6;
+  spr.setTextColor(stateCol, DS_BLACK);
+  spr.setCursor(sx, 4);
+  spr.print(stateLbl);
+  drawStatusDot(sx - 8, 7, stateCol, 3, true);
+  spr.drawFastHLine(0, H_STRIP - 1, W, DS_LINE);
+}
+
+// MiniDots — a row of `max` small circles, first `value` filled (color), the
+// rest hollow (dim outline). Ported from the JSX MiniDots atom. Returns the x
+// just past the row so callers can chain.
+static int drawMiniDots(int x, int y, uint8_t value, uint8_t mx,
+                        uint16_t col, int r = 3, int gap = 4) {
+  int step = r * 2 + gap;
+  for (uint8_t i = 0; i < mx; i++) {
+    int cx = x + r + i * step;
+    if (i < value) spr.fillCircle(cx, y, r, col);
+    else           spr.drawCircle(cx, y, r, DS_OFFDOT);
+  }
+  return x + mx * step;
+}
+
+// MiniBars — a row of `max` small rectangles, first `value` filled (color), the
+// rest hollow (dim outline). Ported from the JSX MiniBars atom.
+static int drawMiniBars(int x, int y, uint8_t value, uint8_t mx,
+                        uint16_t col, int w = 7, int h = 9, int gap = 2) {
+  int step = w + gap;
+  for (uint8_t i = 0; i < mx; i++) {
+    int bx = x + i * step;
+    if (i < value) spr.fillRect(bx, y, w, h, col);
+    else           spr.drawRect(bx, y, w, h, DS_OFFBAR);
+  }
+  return x + mx * step;
+}
+
+// Short token formatter (e.g. 31200 → "31.2K", 184000 → "184K", 3_700_000 →
+// "3.7M"). Writes into caller's buffer and returns it. Shared by the home hero
+// and the sessions strip. `unitOut` (optional) receives the trailing unit char
+// so callers can render it dim/smaller per the design (e.g. "31.2" + dim "K").
+static const char* fmtTokens(char* buf, size_t bsz, uint32_t v, char* unitOut = nullptr) {
+  char unit = 0;
+  // ≥100K and ≥10M: no decimal (3 digits is plenty). Below that: 1 decimal,
+  // matching the canvas figures "31.2K" / "184K" / "3.7M".
+  if      (v >= 1000000000UL) { snprintf(buf, bsz, "%lu.%lu", (unsigned long)(v/1000000000UL), (unsigned long)((v/100000000UL)%10)); unit='B'; }
+  else if (v >= 10000000UL)   { snprintf(buf, bsz, "%lu", (unsigned long)(v/1000000UL)); unit='M'; }
+  else if (v >= 1000000UL)    { snprintf(buf, bsz, "%lu.%lu", (unsigned long)(v/1000000UL), (unsigned long)((v/100000UL)%10)); unit='M'; }
+  else if (v >= 100000UL)     { snprintf(buf, bsz, "%lu", (unsigned long)(v/1000UL)); unit='K'; }
+  else if (v >= 1000UL)       { snprintf(buf, bsz, "%lu.%lu", (unsigned long)(v/1000UL), (unsigned long)((v/100UL)%10)); unit='K'; }
+  else                        { snprintf(buf, bsz, "%lu", (unsigned long)v); }
+  if (unitOut) *unitOut = unit;
+  return buf;
+}
+
+// Battery percentage from the AXP192 (same derivation drawPetStats / the DEVICE
+// info page use): (Vbat − 3.2V) scaled to 0..100. Clamped.
+static uint8_t batteryPct() {
+  int vBat_mV = (int)(M5.Axp.GetBatVoltage() * 1000);
+  int pct = (vBat_mV - 3200) / 10;
+  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+  return (uint8_t)pct;
+}
+
 // Footer hint row inside a menu panel: "<downLbl> ↓  <rightLbl> →" with
 // pixel triangles. Panels add MENU_HINT_H to height and call this at bottom.
 const int MENU_HINT_H = 14;
@@ -328,11 +462,72 @@ static void drawMenuHints(const Palette& p, int mx, int mw, int hy,
   spr.fillTriangle(x, hy, x, hy + 6, x + 5, hy + 3, p.textDim);
 }
 
-// v2 design: full-width card, orange header pill, 4-px orange left bar
-// marks the selected row, dim divider above the footer hint strip.
-// Settings stays at size 1 because "brightness"/"transcript" are 10
-// chars wide and at size 2 (12 px/char) the label overflows the value
-// column. Menu and Reset move to size 2 — those lists are shorter.
+// ── Shared full-screen list menu (screens.jsx ScreenMenu/UsageMenu/ConnMenu)
+// All three list submenus share one look: a dark header strip with the title
+// (size 2) + "sel+1/total" counter, full-width rows where the SELECTED row is a
+// solid orange band with a ">" marker and black text (per-row danger rows go
+// red when selected), and a footer hint strip. Rendered full-screen — the
+// canvas screens own the whole 135×240 viewport — with size-2 body labels.
+//
+// A row's right-hand meta string is supplied by `metaFn` (label + color +
+// danger flag), so the same renderer drives the demo toggle, the active-radio
+// check, the span label, and the destructive-row coloring.
+typedef void (*ListMetaFn)(int idx, char* out, size_t osz, uint16_t* col, bool* danger);
+
+static void drawListMenu(const char* title, const char* const* items, int n,
+                         int sel, const char* footL, const char* footR,
+                         ListMetaFn metaFn) {
+  spr.fillSprite(DS_BLACK);
+  const int HEADER_H = 20, FOOTER_H = 14;
+  // Header strip
+  spr.fillRect(0, 0, W, HEADER_H, DS_HEADER);
+  spr.drawFastHLine(0, HEADER_H, W, DS_HDRBORD);
+  spr.setTextSize(2);
+  spr.setTextColor(DS_WHITE, DS_HEADER);
+  spr.setCursor(6, 3);
+  spr.print(title);
+  char cb[12]; snprintf(cb, sizeof(cb), "%d/%d", sel + 1, n);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_DIM, DS_HEADER);
+  spr.setCursor(W - 6 - (int)strlen(cb) * 6, 7);
+  spr.print(cb);
+
+  // Rows — evenly fill the band between header and footer.
+  const int rowsTop = HEADER_H + 3;
+  const int avail   = H - rowsTop - FOOTER_H - 2;
+  const int ROW_H   = avail / (n > 0 ? n : 1);
+  for (int i = 0; i < n; i++) {
+    int ry = rowsTop + i * ROW_H;
+    char meta[16] = ""; uint16_t mcol = DS_DIM; bool danger = false;
+    if (metaFn) metaFn(i, meta, sizeof(meta), &mcol, &danger);
+    bool sel_ = (i == sel);
+    uint16_t rowBg    = sel_ ? (danger ? DS_CFMHDR : DS_ORANGE) : DS_BLACK;
+    uint16_t labelCol = sel_ ? DS_BLACK : (danger ? DS_REDSOFT : DS_WHITE);
+    if (sel_) spr.fillRect(0, ry, W, ROW_H, rowBg);
+    spr.setTextSize(2);
+    if (sel_) { spr.setTextColor(DS_BLACK, rowBg); spr.setCursor(4, ry + (ROW_H - 16) / 2); spr.print(">"); }
+    spr.setTextColor(labelCol, sel_ ? rowBg : DS_BLACK);
+    spr.setCursor(18, ry + (ROW_H - 16) / 2);
+    spr.print(items[i]);
+    if (meta[0]) {
+      spr.setTextSize(1);
+      spr.setTextColor(sel_ ? DS_BLACK : mcol, sel_ ? rowBg : DS_BLACK);
+      spr.setCursor(W - 6 - (int)strlen(meta) * 6, ry + (ROW_H - 8) / 2);
+      spr.print(meta);
+    }
+  }
+
+  // Footer hint strip
+  int fy = H - FOOTER_H;
+  spr.fillRect(0, fy, W, FOOTER_H, DS_DARK);
+  spr.drawFastHLine(0, fy, W, DS_LINE);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_DIM, DS_DARK);
+  spr.setCursor(6, fy + 4);
+  spr.print(footL);
+  spr.setCursor(W - 6 - (int)strlen(footR) * 6, fy + 4);
+  spr.print(footR);
+}
 
 static void drawSettings() {
   const Palette& p = characterPalette();
@@ -394,90 +589,82 @@ static void drawSettings() {
   spr.print("A Next   B Change");
 }
 
-static void drawReset() {
-  const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 22, FOOTER_H = 16, ROW_H = 22;
-  const int mh = HEADER_H + RESET_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  // Card chrome — red border to signal danger
-  spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
-  spr.drawRoundRect(mx, my, mw, mh, 4, HOT);
-
-  // Header pill — RED for reset
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, HOT);
-  spr.setTextSize(2);
-  spr.setTextColor(0x0000, HOT);
-  spr.setCursor(mx + 6, my + 4);
-  spr.print("RESET");
-
-  int rowsTop = my + HEADER_H + 2;
-  for (int i = 0; i < RESET_N; i++) {
-    bool sel = (i == resetSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) spr.fillRect(mx + 1, ry, 3, ROW_H - 2, p.body);
-    bool armed = (i == resetConfirmIdx) &&
-                 (int32_t)(millis() - resetConfirmUntil) < 0;
-    spr.setTextSize(2);
-    spr.setTextColor(armed ? HOT : (sel ? p.text : p.textDim), PANEL);
-    spr.setCursor(mx + 8, ry + 4);
-    spr.print(armed ? "really?" : resetItems[i]);
-  }
-
-  // Footer
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextSize(1);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Confirm");
+// Reset submenu meta — "delete char" / "factory reset" are both destructive.
+static void resetMeta(int i, char* out, size_t osz, uint16_t* col, bool* danger) {
+  if (i < 2) { snprintf(out, osz, "!"); *col = DS_REDSOFT; *danger = true; }
 }
 
-// Connection submenu — radio (WiFi/BT/Off) + Adapter. Styled like
-// drawSettings (size-1 rows) so the labels and the on/off-ish state column
-// fit the 135-px width. Opened from the CONNECTIONS info page.
-static void drawConn() {
-  const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 18;
-  const int mh = HEADER_H + CONN_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
-  spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
-
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
+// ScreenConfirmDestructive — the full-screen tap-twice confirm overlay. Shown
+// (over the list) once a destructive row is armed. Red header + "tap n/2" +
+// the action sentence + an A reset / B cancel action footer. The firmware's
+// arm/execute model is two taps total (arm → confirm), so the armed state is
+// "tap 1/2" awaiting the final tap.
+static void drawResetConfirm(const char* action, const char* l1, const char* l2,
+                             const char* l3) {
+  spr.fillSprite(DS_CFMBG);
+  // Red header bar
+  spr.fillRect(0, 0, W, 22, DS_CFMHDR);
   spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(mx + 6, my + 6);
-  spr.print("CONNECTION");
+  spr.setTextColor(DS_BLACK, DS_CFMHDR);
+  spr.setCursor(6, 3);  spr.print("! DESTRUCTIVE");
+  spr.setTextSize(2);
+  spr.setTextColor(DS_BLACK, DS_CFMHDR);
+  spr.setCursor(W - 6 - 4 * 12, 3);  spr.print("1/2");
 
-  Settings& s = settings();
-  // Which radio mode is active now, so the row shows a live indicator.
-  bool wifiOn = s.wifi, btOn = s.bt, off = !s.wifi && !s.bt;
-  int rowsTop = my + HEADER_H + 3;
-  for (int i = 0; i < CONN_N; i++) {
-    bool sel = (i == connSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);
-    spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 8, ry + 4);
-    spr.print(connItems[i]);
-    // Active-radio dot on the matching row.
-    bool active = (i == 0 && wifiOn) || (i == 1 && btOn) || (i == 2 && off);
-    if (active) {
-      spr.setTextColor(GREEN, PANEL);
-      spr.setCursor(mx + mw - 16, ry + 4);
-      spr.print("o");
-    }
+  // Body — action label (dim red) + big white sentence, centered-ish.
+  int y = 56;
+  spr.setTextSize(1);
+  spr.setTextColor(DS_REDSOFT, DS_CFMBG);
+  spr.setCursor((W - (int)strlen(action) * 6) / 2, y); spr.print(action);
+  y += 18;
+  spr.setTextSize(2);
+  spr.setTextColor(DS_WHITE, DS_CFMBG);
+  const char* lines[3] = { l1, l2, l3 };
+  for (int i = 0; i < 3; i++) {
+    if (!lines[i] || !lines[i][0]) continue;
+    spr.setCursor((W - (int)strlen(lines[i]) * 12) / 2, y); spr.print(lines[i]);
+    y += 20;
   }
+  y += 8;
+  spr.setTextSize(1);
+  spr.setTextColor(DS_DIM, DS_CFMBG);
+  const char* hint = "tap B to confirm";
+  spr.setCursor((W - (int)strlen(hint) * 6) / 2, y); spr.print(hint);
 
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Select");
+  // Action footer. Button semantics (see loop()): on the reset menu BtnB
+  // confirms/executes the armed row; BtnA scrolls (which disarms = cancel).
+  // So the footer reads A cancel (green) | B reset (red), matching reality.
+  const int FH = 34, FY = H - FH;
+  spr.fillRect(0,     FY, W / 2,     FH, DS_CXLBG);
+  spr.fillRect(W / 2, FY, W - W / 2, FH, DS_DENYBG);
+  spr.drawFastVLine(W / 2, FY, FH, DS_BLACK);
+  spr.setTextColor(DS_GRNSOFT, DS_CXLBG);
+  spr.setCursor(8, FY + 12);          spr.print("A cancel");
+  spr.setTextColor(DS_REDSOFT, DS_DENYBG);
+  spr.setCursor(W / 2 + 8, FY + 12);  spr.print("B reset");
+}
+
+static void drawReset() {
+  // Armed → full-screen destructive confirm (ScreenConfirmDestructive).
+  bool armed = (int32_t)(millis() - resetConfirmUntil) < 0 && resetConfirmIdx < 2;
+  if (armed) {
+    if (resetConfirmIdx == 0) drawResetConfirm("delete char", "wipe the", "installed", "character?");
+    else                      drawResetConfirm("factory reset", "erase ALL", "data and", "re-pair?");
+    return;
+  }
+  // Otherwise the destructive list, shared look, red danger meta.
+  drawListMenu("RESET", resetItems, RESET_N, resetSel, "A scroll", "B confirm", resetMeta);
+}
+
+// Connection submenu — ScreenConnMenu ("RADIO"). The currently-active radio
+// row (WiFi / BT / Off) carries a green "✓" meta; "WiFi ⊕ BT" + "reboots" hint.
+static void connMeta(int i, char* out, size_t osz, uint16_t* col, bool* danger) {
+  Settings& s = settings();
+  bool active = (i == 0 && s.wifi) || (i == 1 && s.bt) || (i == 2 && !s.wifi && !s.bt);
+  if (active) { snprintf(out, osz, "ON"); *col = DS_GREEN; }
+}
+static void drawConn() {
+  drawListMenu("RADIO", connItems, CONN_N, connSel, "WiFi+BT", "reboots", connMeta);
 }
 
 static void applyConn(uint8_t idx) {
@@ -517,49 +704,22 @@ static void applyConn(uint8_t idx) {
   }
 }
 
-// Usage submenu — reporting span + period/level resets. Styled like
-// drawSettings. Opened from the USAGE info page.
+// Usage submenu — ScreenUsageMenu ("USAGE"). The span row carries the current
+// reporting window as meta (cycler); "reset level" (index 2) is destructive →
+// red. A tap-twice-armed reset swaps its LABEL to "really?" via a local items
+// copy, so the shared list renderer can stay generic.
+static void usageMeta(int i, char* out, size_t osz, uint16_t* col, bool* danger) {
+  if (i == 0) { snprintf(out, osz, "%s", USAGE_SPANS[usageSpanIdx]); *col = DS_ORANGE; }
+  else if (i == 2) { snprintf(out, osz, "!"); *col = DS_REDSOFT; *danger = true; }
+}
 static void drawUsage() {
-  const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 20;
-  const int mh = HEADER_H + USAGE_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
-  spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
-
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
-  spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(mx + 6, my + 6);
-  spr.print("USAGE");
-
-  int rowsTop = my + HEADER_H + 3;
-  for (int i = 0; i < USAGE_N; i++) {
-    bool sel = (i == usageSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);
-    bool armed = (i == usageConfirmIdx) &&
-                 (int32_t)(millis() - usageConfirmUntil) < 0;
-    spr.setTextColor(armed ? HOT : (sel ? p.text : p.textDim), PANEL);
-    spr.setCursor(mx + 8, ry + 5);
-    if (i == 0) {
-      // span row carries its current label inline.
-      spr.printf("span: %s", USAGE_SPANS[usageSpanIdx]);
-    } else if (armed) {
-      // reset level is the destructive one — make the confirm read "really?".
-      spr.print(i == 2 ? "really?!" : "really?");
-    } else {
-      spr.print(usageItems[i]);
-    }
-  }
-
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Change");
+  const char* items[USAGE_N];
+  for (int i = 0; i < USAGE_N; i++) items[i] = usageItems[i];
+  // Reflect an armed tap-twice confirm in the row label.
+  bool armed = (int32_t)(millis() - usageConfirmUntil) < 0;
+  if (armed && usageConfirmIdx == 1) items[1] = "really?";
+  if (armed && usageConfirmIdx == 2) items[2] = "really?!";
+  drawListMenu("USAGE", items, USAGE_N, usageSel, "A scroll", "B select", usageMeta);
 }
 
 static void applyUsage(uint8_t idx) {
@@ -619,49 +779,16 @@ void menuConfirm() {
   }
 }
 
-// Main menu — matched to drawSettings/drawConn/drawUsage so all the menus
-// share one look: 18-px header pill (size-1 label), 18-px size-1 rows, the
-// same 3-px orange left bar marking the selection, and the same footer strip.
-void drawMenu() {
-  const Palette& p = characterPalette();
-  const int mw = W - 8, mx = 4;
-  const int HEADER_H = 18, FOOTER_H = 16, ROW_H = 18;
-  const int mh = HEADER_H + MENU_N * ROW_H + FOOTER_H;
-  const int my = (H - mh) / 2;
-
-  // Card chrome
-  spr.fillRoundRect(mx, my, mw, mh, 4, PANEL);
-  spr.drawRoundRect(mx, my, mw, mh, 4, p.textDim);
-
-  // Header pill — orange
-  spr.fillRoundRect(mx, my, mw, HEADER_H, 4, p.body);
-  spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(mx + 6, my + 6);
-  spr.print("MENU");
-
-  int rowsTop = my + HEADER_H + 3;
-  for (int i = 0; i < MENU_N; i++) {
-    bool sel = (i == menuSel);
-    int ry = rowsTop + i * ROW_H;
-    if (sel) spr.fillRect(mx + 1, ry - 1, 3, ROW_H, p.body);
-    spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 8, ry + 4);
-    spr.print(menuItems[i]);
-    if (i == 4) {
-      bool on = dataDemo();
-      spr.setTextColor(on ? GREEN : p.textDim, PANEL);
-      spr.setCursor(mx + mw - 28, ry + 4);
-      spr.print(on ? "on" : "off");
-    }
+// Main menu — ScreenMenu. The "demo" row (index 4) carries an on/off meta.
+static void menuMeta(int i, char* out, size_t osz, uint16_t* col, bool* danger) {
+  if (i == 4) {
+    bool on = dataDemo();
+    snprintf(out, osz, "%s", on ? "on" : "off");
+    *col = on ? DS_GREEN : DS_DIM;
   }
-
-  // Footer
-  int fy = my + mh - FOOTER_H;
-  spr.drawFastHLine(mx + 4, fy, mw - 8, p.textDim);
-  spr.setTextColor(p.textDim, PANEL);
-  spr.setCursor(mx + 6, fy + 4);
-  spr.print("A Next   B Select");
+}
+void drawMenu() {
+  drawListMenu("MENU", menuItems, MENU_N, menuSel, "A scroll", "B select", menuMeta);
 }
 
 // Clock orientation: gravity along the in-plane X axis means the stick is
@@ -889,60 +1016,72 @@ bool checkShake() {
 
 
 
-// Persistent screen-level title row ("INFO  n/3") matching the PET header,
-// then a per-page section label below it. The fixed title is the cue that
-// B cycles pages here just like it does on PET.
+// Design-style info header strip (ScreenInfo): a full-width dark band with the
+// section title in size-2 white and a dim "page+1/total" counter, hairline
+// dividers top and bottom. Sits below the small gr0m head peek (rows 0..TOP).
 static void _infoHeader(const Palette& p, int& y, const char* section, uint8_t page) {
-  // Smaller orange pill — label dropped to size 1 and pill height
-  // shrunk 22 → 14 px so it's less visually dominant on every Info page.
-  const int HEADER_H = 14;
-  spr.fillRoundRect(4, y, W - 8, HEADER_H, 3, p.body);
-  spr.setTextSize(1);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(8, y + 4);
+  const int HEADER_H = 18;
+  spr.fillRect(0, y, W, HEADER_H, DS_DARK);
+  spr.drawFastHLine(0, y, W, DS_LINE);
+  spr.drawFastHLine(0, y + HEADER_H, W, DS_LINE);
+  spr.setTextSize(2);
+  spr.setTextColor(DS_WHITE, DS_DARK);
+  spr.setCursor(6, y + 2);
   spr.print(section);
-  // Page counter right-aligned
   char pb[8]; snprintf(pb, sizeof(pb), "%u/%u", page + 1, INFO_PAGES);
-  int plen = strlen(pb);
-  spr.setCursor(W - 8 - plen * 6, y + 4);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_DIM, DS_DARK);
+  spr.setCursor(W - 6 - (int)strlen(pb) * 6, y + 5);
   spr.print(pb);
   y += HEADER_H + 6;
+  spr.setTextSize(1);
 }
 
+// ScreenPasskey — BLUETOOTH PAIRING. Blue header banner, dim "ENTER ON DESKTOP"
+// label, the 6-digit passkey inside a glowing cyan double-border group (size 3
+// hero digits), then DEVICE NAME + the live advertised name.
 void drawPasskey() {
-  const Palette& p = characterPalette();
-  const uint16_t BORDER = 0x05FF;   // cyan; named locally to avoid the
-                                    // CYAN macro from TFT_eSPI/In_eSPI.h
-  spr.fillSprite(p.bg);
+  spr.fillSprite(DS_BLACK);
 
-  // Header pill — orange (consistent with menu/settings)
-  spr.fillRoundRect(4, 40, W - 8, 22, 4, p.body);
-  spr.setTextSize(2);
-  spr.setTextColor(p.bg, p.body);
-  spr.setCursor(10, 44);
-  spr.print("PAIRING");
+  // Header banner — blue, centered title (size 1, letter-spaced look).
+  spr.fillRect(0, 0, W, 18, DS_PASSHDR);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_WHITE, DS_PASSHDR);
+  const char* hdr = "BT PAIRING";
+  spr.setCursor((W - (int)strlen(hdr) * 6) / 2, 5);
+  spr.print(hdr);
 
-  // Cyan border around the digit group
+  // "ENTER ON DESKTOP" dim label.
+  spr.setTextColor(DS_DIM, DS_BLACK);
+  const char* sub = "ENTER ON DESKTOP";
+  spr.setCursor((W - (int)strlen(sub) * 6) / 2, 56);
+  spr.print(sub);
+
+  // Cyan double-bordered digit group with the hero passkey (size 3).
   char b[8]; snprintf(b, sizeof(b), "%06lu", (unsigned long)blePasskey());
   const int digW = 18 * 6;            // 6 digits × 18 px at size 3
   const int dx   = (W - digW) / 2 - 6;
-  const int dy   = 100;
+  const int dy   = 84;
   const int dw   = digW + 12;
-  const int dh   = 30;
-  spr.drawRoundRect(dx,     dy,     dw,     dh,     5, BORDER);
-  spr.drawRoundRect(dx - 1, dy - 1, dw + 2, dh + 2, 6, BORDER);
-
+  const int dh   = 34;
+  spr.fillRoundRect(dx, dy, dw, dh, 4, DS_DARK);
+  spr.drawRoundRect(dx,     dy,     dw,     dh,     4, DS_CYAN);
+  spr.drawRoundRect(dx - 1, dy - 1, dw + 2, dh + 2, 5, DS_CYAN);
   spr.setTextSize(3);
-  spr.setTextColor(p.text, p.bg);
-  spr.setCursor((W - digW) / 2, dy + 3);
+  spr.setTextColor(DS_WHITE, DS_DARK);
+  spr.setCursor((W - digW) / 2, dy + 6);
   spr.print(b);
 
-  // Sub-line
+  // DEVICE NAME + live advertised name.
   spr.setTextSize(1);
-  spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(8, 180); spr.print("enter on desktop");
-  spr.setCursor(8, 192); spr.print("> Developer");
-  spr.setCursor(8, 204); spr.print("> Hardware Buddy");
+  spr.setTextColor(DS_DIM, DS_BLACK);
+  const char* dnl = "DEVICE NAME";
+  spr.setCursor((W - (int)strlen(dnl) * 6) / 2, 152);
+  spr.print(dnl);
+  spr.setTextSize(2);
+  spr.setTextColor(DS_WHITE, DS_BLACK);
+  spr.setCursor((W - (int)strlen(btName) * 12) / 2, 166);
+  spr.print(btName);
 }
 
 void drawInfo() {
@@ -970,18 +1109,21 @@ void drawInfo() {
   };
 
   if (infoPage == 0) {
+    // ScreenInfo — ABOUT. White lead line (size 2), hairline, dim copy.
     _infoHeader(p, y, "ABOUT", infoPage);
-    spr.setTextColor(p.textDim, p.bg);
-    lg("I watch your");
-    lg("Claude desktop.");
-    y += 4;
-    lg("Sleep when idle,");
-    lg("wake when busy,");
-    lg("fret on prompts.");
-    y += 4;
-    spr.setTextColor(p.text, p.bg);
-    lg("Press A to");
-    lg("approve.");
+    spr.setTextColor(DS_WHITE, p.bg);
+    spr.setTextSize(2);
+    spr.setCursor(4, y);       spr.print("I watch");
+    spr.setCursor(4, y + 18);  spr.print("your Claude");
+    spr.setCursor(4, y + 36);  spr.print("sessions.");
+    y += 60;
+    spr.drawFastHLine(4, y, W - 8, DS_LINE);
+    y += 8;
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y);       spr.print("Sleep when");
+    spr.setCursor(4, y + 18);  spr.print("idle. Wake");
+    spr.setCursor(4, y + 36);  spr.print("on prompts.");
+    spr.setTextSize(1);
 
   } else if (infoPage == 1) {
     _infoHeader(p, y, "BUTTONS", infoPage);
@@ -1052,81 +1194,155 @@ void drawInfo() {
     ln("  temp     %dC", (int)M5.Axp.GetTempInAXP192());
 
   } else if (infoPage == 4) {
-    // All three transports on one page. State is read from cached getters
-    // (netWifiState / netWgState are updated in the tick loop, and RSSI is
-    // cached too) — nothing here polls a driver per render frame.
-    _infoHeader(p, y, "CONNECTIONS", infoPage);
+    // ScreenBluetooth — the connection status page. Hero BT link state
+    // (LINKED / ON / OFF), an ENCRYPTED status dot, then DEVICE + OWNER rows.
+    // WiFi/VPN remain as compact secondary rows since this is the only
+    // transport page; the design's BT block is the hero.
+    _infoHeader(p, y, "BLUETOOTH", infoPage);
 
-    // ── Bluetooth ──
-    bool linked = settings().bt && dataBtActive();
-    spr.setTextColor(p.text, p.bg); ln("BT");
-    spr.setTextColor(linked ? GREEN : (settings().bt ? 0xFFE0 : p.textDim), p.bg);
-    ln("  %s", linked ? "linked" : (settings().bt ? "discoverable" : "off"));
-
-    // ── WiFi ──
-    y += 4;
+    bool connected = bleConnected();
+    bool linked    = settings().bt && (connected || dataBtActive());
+    bool secure    = connected && bleSecure();
+    // Hero link state — size 3, green when linked.
+    spr.setTextSize(2);
+    const char* big = linked ? "LINKED" : (settings().bt ? "READY" : "OFF");
+    uint16_t bigCol = linked ? DS_GREEN : (settings().bt ? DS_AMBER : DS_DIM);
+    spr.setTextColor(bigCol, p.bg);
+    spr.setCursor(4, y);
+    spr.print(big);
+    y += 22;
+    // ENCRYPTED status dot + label.
+    if (linked) {
+      uint16_t encCol = secure ? DS_GREEN : DS_AMBER;
+      drawStatusDot(8, y + 4, encCol, 3, true);
+      spr.setTextSize(1);
+      spr.setTextColor(encCol, p.bg);
+      spr.setCursor(16, y + 1);
+      spr.print(secure ? "ENCRYPTED" : "OPEN LINK");
+      y += 14;
+    }
+    spr.drawFastHLine(4, y, W - 8, DS_LINE);
+    y += 6;
+    // DEVICE
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y); spr.print("DEVICE");
+    y += 10;
+    spr.setTextSize(2);
+    spr.setTextColor(DS_WHITE, p.bg);
+    spr.setCursor(4, y); spr.print(btName);
+    y += 20;
+    // OWNER
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y); spr.print("OWNER");
+    y += 10;
+    spr.setTextSize(2);
+    spr.setTextColor(DS_WHITE, p.bg);
+    spr.setCursor(4, y); spr.print(ownerName()[0] ? ownerName() : "-");
+    y += 20;
+    // Compact WiFi/VPN secondary rows (size 1).
     NetWifiState ws = netWifiState();
-    spr.setTextColor(p.text, p.bg); ln("WIFI");
-    uint16_t wc = (ws == NW_ONLINE) ? GREEN : (ws == NW_FAILED) ? HOT
-                : (ws == NW_OFF) ? p.textDim : 0xFFE0;
-    const char* wl = (ws == NW_ONLINE) ? "online" : (ws == NW_OFF) ? "off"
-                   : (ws == NW_PORTAL) ? "setup AP" : (ws == NW_FAILED) ? "failed"
-                   : "connecting";
-    spr.setTextColor(wc, p.bg); ln("  %s", wl);
-    if (ws == NW_ONLINE) {
-      spr.setTextColor(p.textDim, p.bg);
-      ln("  %s", netWifiIP());
+    if (ws != NW_OFF) {
+      uint16_t wc = (ws == NW_ONLINE) ? DS_GREEN : (ws == NW_FAILED) ? DS_RED : DS_AMBER;
+      const char* wl = (ws == NW_ONLINE) ? "online" : (ws == NW_PORTAL) ? "setup AP"
+                     : (ws == NW_FAILED) ? "failed" : "connecting";
+      spr.setTextSize(1);
+      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("wifi");
+      spr.setTextColor(wc, p.bg); spr.setCursor(40, y); spr.print(wl);
+      y += 10;
     }
-
-    // ── VPN (WireGuard) — only once a tunnel is configured ──
     if (netWgState() != WG_OFF) {
-      y += 4;
       NetWgState gs = netWgState();
-      spr.setTextColor(p.text, p.bg); ln("VPN");
-      spr.setTextColor(gs == WG_UP ? GREEN : gs == WG_FAILED ? HOT : 0xFFE0, p.bg);
-      ln("  %s", gs == WG_UP ? "up" : gs == WG_FAILED ? "failed" : "connecting");
-      if (gs == WG_UP) { spr.setTextColor(p.textDim, p.bg); ln("  %s", netWgTunnelIP()); }
+      uint16_t gc = gs == WG_UP ? DS_GREEN : gs == WG_FAILED ? DS_RED : DS_AMBER;
+      spr.setTextColor(DS_DIM, p.bg); spr.setCursor(4, y); spr.print("vpn");
+      spr.setTextColor(gc, p.bg); spr.setCursor(40, y);
+      spr.print(gs == WG_UP ? "up" : gs == WG_FAILED ? "failed" : "...");
+      y += 10;
     }
-
     // Hint: BtnA long-press opens the Connection submenu (gated in loop()).
-    spr.setTextColor(p.textDim, p.bg);
-    spr.setCursor(4, H - 12); spr.print("hold A: edit");
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, H - 10); spr.print("hold A: edit");
 
   } else if (infoPage == INFO_PG_USAGE) {
+    // ScreenUsage — TODAY hero + OK/NO + EVOLUTION stage + progress bar + LEVEL.
     _infoHeader(p, y, "USAGE", infoPage);
 
-    // Period token figure (chest-LCD source) — hero number.
-    spr.setTextColor(p.text, p.bg);
-    spr.setTextSize(2);
-    spr.setCursor(4, y);
-    spr.printf("%lu", (unsigned long)stats().tokens);   // full exact count — the Usage screen is the detailed view
+    // TODAY hero (period tokens, orange, short format) — size 3 number.
+    spr.setTextColor(DS_DIM, p.bg);
     spr.setTextSize(1);
-    spr.setTextColor(p.textDim, p.bg);
-    spr.setCursor(4, y + 18); spr.print("tokens");
+    spr.setCursor(4, y); spr.print("TODAY");
+    y += 10;
+    char tb[12]; char unit = 0;
+    fmtTokens(tb, sizeof(tb), stats().tokens, &unit);
+    spr.setTextSize(3);
+    spr.setTextColor(DS_ORANGE, p.bg);
+    spr.setCursor(4, y); spr.print(tb);
+    if (unit) {
+      int w3 = (int)strlen(tb) * 18;
+      spr.setTextSize(2);
+      spr.setCursor(4 + w3 + 2, y + 7);
+      spr.print(unit);
+    }
+    y += 30;
+
+    // OK / NO counters (size 2 values).
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y);  spr.print("OK");
+    spr.setCursor(70, y); spr.print("NO");
+    spr.setTextSize(2);
+    spr.setTextColor(DS_GREEN, p.bg);  spr.setCursor(4, y + 10);  spr.printf("%u", stats().okCount);
+    spr.setTextColor(DS_REDSOFT, p.bg); spr.setCursor(70, y + 10); spr.printf("%u", stats().noCount);
     y += 32;
+    spr.drawFastHLine(4, y, W - 8, DS_LINE);
+    y += 6;
 
-    // Approved / denied this period.
-    spr.setTextColor(0x07E0, p.bg); spr.setCursor(4, y);  spr.printf("OK %u", stats().okCount);
-    spr.setTextColor(HOT,    p.bg); spr.setCursor(68, y); spr.printf("NO %u", stats().noCount);
-    y += 14;
-
-    // Level (lifetime-derived monotonic score).
-    spr.setTextColor(p.text, p.bg); spr.setCursor(4, y);
-    spr.printf("LV %u", stats().level);
-    y += 14;
-
-    // Evolution stage + next milestone (e.g. "Stage 3/5 ->100M").
+    // EVOLUTION — "Stage n/5" + next-milestone arrow, then a progress bar.
+    uint8_t stg = evoStage();
     uint32_t nxt = evoNextMilestone();
-    char mb[8];
-    if (nxt == 0)              snprintf(mb, sizeof(mb), "max");
-    else if (nxt >= 1000000UL) snprintf(mb, sizeof(mb), "%luM", (unsigned long)(nxt / 1000000UL));
-    else                       snprintf(mb, sizeof(mb), "%luK", (unsigned long)(nxt / 1000UL));
-    spr.setTextColor(p.body, p.bg); spr.setCursor(4, y);
-    spr.printf("Stage %u/5 ->%s", evoStage(), mb);
-    y += 14;
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y); spr.print("EVOLUTION");
+    // milestone label, right-aligned
+    char mb[10];
+    if (nxt == 0)              snprintf(mb, sizeof(mb), "MAX");
+    else if (nxt >= 1000000UL) snprintf(mb, sizeof(mb), ">%luM", (unsigned long)(nxt / 1000000UL));
+    else                       snprintf(mb, sizeof(mb), ">%luK", (unsigned long)(nxt / 1000UL));
+    spr.setTextColor(DS_ORANGE, p.bg);
+    spr.setCursor(W - 4 - (int)strlen(mb) * 6, y); spr.print(mb);
+    y += 11;
+    spr.setTextSize(2);
+    spr.setTextColor(DS_WHITE, p.bg);
+    spr.setCursor(4, y); spr.printf("Stage %u", stg);
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4 + 7 * 12 + 2, y + 8); spr.print("/5");
+    y += 20;
+    // Progress bar — fraction of the way to the next milestone.
+    {
+      uint32_t life = stats().lifetimeTokens;
+      uint32_t prev = (stg == 0) ? 0 : EVO_MILESTONES[stg - 1];
+      uint32_t span = (nxt == 0) ? 1 : (nxt - prev);
+      uint32_t into = (life > prev) ? (life - prev) : 0;
+      int pct = (nxt == 0) ? 100 : (int)((into * 100) / span);
+      if (pct > 100) pct = 100;
+      int bw = W - 8;
+      spr.fillRect(4, y, bw, 6, DS_LINE);
+      int fw = (bw * pct) / 100;
+      if (fw > 0) spr.fillRect(4, y, fw, 6, DS_ORANGE);
+    }
+    y += 12;
+    // LEVEL row.
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, y); spr.print("LEVEL");
+    spr.setTextColor(DS_WHITE, p.bg);
+    char lvb[8]; snprintf(lvb, sizeof(lvb), "%u", stats().level);
+    spr.setCursor(W - 4 - (int)strlen(lvb) * 6, y); spr.print(lvb);
+    y += 12;
 
-    spr.setTextColor(p.textDim, p.bg);
-    spr.setCursor(4, H - 12); spr.print("hold A: edit");
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(4, H - 10); spr.print("hold A: edit");
 
   } else {
     _infoHeader(p, y, "CREDITS", infoPage);
@@ -1718,35 +1934,42 @@ static void drawListeningIndicator() {
   }
 }
 
-void drawHUD() {
-  if (tama.promptId[0]) { drawApproval(); return; }
-  const Palette& p = characterPalette();
-  // Transcript at setTextSize(2): glyphs are 12×16 px so WIDTH = 10
-  // chars/line (10·12 = 120 px ≤ 135) and SHOW = 2 rows.
+// ── HOME screen (ScreenHomeIdle / ScreenHomeWorking) ──────────────────────
+// The buddy/character is already composited into the upper band of `spr` by
+// buddyTick()/characterTick() before this runs. drawHUD overlays:
+//   • the design header strip across the top 22 px (gr0m + state dot + battery)
+//   • a bottom stats region driven by session state:
+//       IDLE → "TOKENS TODAY" + a size-3 hero of g_dispTokens
+//       BUSY → a RUN/WAIT/TOK inset strip + the two most-recent transcript rows
+// Approval still short-circuits to drawApproval(). Transcript scroll + the
+// response-preview banner behaviour are preserved in the BUSY path.
+
+// BUSY-path transcript renderer — the original drawHUD body, now bottom-anchored
+// under the sessions strip. Returns nothing; honors msgScroll / lineGen / the
+// response-preview banner exactly as before.
+static void drawHomeTranscript(const Palette& p, int topY) {
   const int SHOW = 2, LH = 16, WIDTH = 10;
   const int AREA = SHOW * LH + 4;
   spr.fillRect(0, H - AREA, W, AREA, p.bg);
-  spr.setTextSize(1);   // banner below uses size-1 metrics
+  spr.setTextSize(1);
 
-  // Response preview banner — shows the most recent `evt: turn` text from
-  // the desktop for ~15s after it arrives, then fades. Single-line truncated.
   if (tama.responseRcvdMs != 0 && (millis() - tama.responseRcvdMs) < 15000) {
-    int by = H - AREA - 19;            // banner sits just above the entries
-    spr.fillRect(0, by, W, 18, 0x18C3); // dark slate background, taller for size-2 text
-    spr.drawFastHLine(0, by, W, 0xFFE0);
-    spr.setTextColor(0xFFFF, 0x18C3);
+    int by = H - AREA - 19;
+    if (by < topY) by = topY;
+    spr.fillRect(0, by, W, 18, DS_PANEL);
+    spr.drawFastHLine(0, by, W, DS_AMBER);
+    spr.setTextColor(DS_WHITE, DS_PANEL);
     spr.setTextSize(2);
     spr.setCursor(3, by + 1);
-    // Manual truncate with ">" sentinel so long previews fit the width
-    int maxChars = (W - 6) / 12;       // 12 px per char at size 2
+    int maxChars = (W - 6) / 12;
     int len = (int)strlen(tama.responsePreview);
     if (len <= maxChars) {
       spr.print(tama.responsePreview);
     } else {
       for (int i = 0; i < maxChars - 1; i++) spr.print(tama.responsePreview[i]);
-      spr.print('>');                  // truncation marker
+      spr.print('>');
     }
-    spr.setTextSize(1);                // restore default for whatever follows
+    spr.setTextSize(1);
   }
 
   if (tama.lineGen != lastLineGen) { msgScroll = 0; lastLineGen = tama.lineGen; wake(); }
@@ -1759,8 +1982,6 @@ void drawHUD() {
     return;
   }
 
-  // Wrap all transcript lines into a flat display buffer. Track which
-  // transcript index each display row came from, so we can dim older ones.
   static char disp[32][24];
   static uint8_t srcOf[32];
   uint8_t nDisp = 0;
@@ -1769,10 +1990,8 @@ void drawHUD() {
     for (uint8_t j = 0; j < got; j++) srcOf[nDisp + j] = i;
     nDisp += got;
   }
-
   uint8_t maxBack = (nDisp > SHOW) ? (nDisp - SHOW) : 0;
   if (msgScroll > maxBack) msgScroll = maxBack;
-
   int end = (int)nDisp - msgScroll;
   int start = end - SHOW; if (start < 0) start = 0;
   uint8_t newest = tama.nLines - 1;
@@ -1780,16 +1999,86 @@ void drawHUD() {
   for (int i = 0; start + i < end; i++) {
     uint8_t row = start + i;
     bool fresh = (srcOf[row] == newest) && (msgScroll == 0);
-    spr.setTextColor(fresh ? p.text : p.textDim, p.bg);
+    spr.setTextColor(fresh ? DS_WHITE : DS_DIM, p.bg);
     spr.setCursor(4, H - AREA + 2 + i * LH);
     spr.print(disp[row]);
   }
   if (msgScroll > 0) {
     spr.setTextSize(2);
-    spr.setTextColor(p.body, p.bg);
-    spr.setCursor(W - 36, H - LH - 2);  // 3 chars × 12 px at size 2 = 36 px
+    spr.setTextColor(DS_ORANGE, p.bg);
+    spr.setCursor(W - 36, H - LH - 2);
     spr.printf("-%u", msgScroll);
   }
+}
+
+void drawHUD() {
+  if (tama.promptId[0]) { drawApproval(); return; }
+  const Palette& p = characterPalette();
+
+  // ── HEADER STRIP ── busy when sessions are running or the persona is BUSY.
+  bool busy = (tama.sessionsRunning > 0) || (activeState == P_BUSY);
+  drawHeaderStrip(busy ? "BUSY" : "IDLE", busy ? DS_GREEN : DS_CYAN, batteryPct());
+
+  if (!busy) {
+    // ScreenHomeIdle — "TOKENS TODAY" + hero number (period tokens mirror).
+    const int STAT_TOP = 168;
+    spr.fillRect(0, STAT_TOP, W, H - STAT_TOP, p.bg);
+    spr.drawFastHLine(0, STAT_TOP, W, DS_LINE);
+    spr.setTextSize(2);
+    spr.setTextColor(DS_DIM, p.bg);
+    spr.setCursor(6, STAT_TOP + 6);  spr.print("TOKENS");
+    spr.setCursor(6, STAT_TOP + 24); spr.print("TODAY");
+    char tb[12]; char unit = 0;
+    fmtTokens(tb, sizeof(tb), g_dispTokens, &unit);
+    spr.setTextSize(3);
+    spr.setTextColor(DS_WHITE, p.bg);
+    spr.setCursor(6, STAT_TOP + 44); spr.print(tb);
+    if (unit) {
+      int w3 = (int)strlen(tb) * 18;
+      spr.setTextSize(2);
+      spr.setTextColor(DS_DIM, p.bg);
+      spr.setCursor(6 + w3 + 2, STAT_TOP + 51);
+      spr.print(unit);
+    }
+    return;
+  }
+
+  // ScreenHomeWorking — RUN / WAIT / TOK inset strip, then transcript below it.
+  const int STRIP_Y = 150, STRIP_H = 30;
+  spr.fillRect(0, STRIP_Y, W, STRIP_H, p.bg);
+  spr.drawFastHLine(0, STRIP_Y, W, DS_LINE);
+  // three insets, widths 40 / 40 / 55 (TOK wider for the value).
+  struct { const char* l; int x; int w; } cells[3] = {
+    { "RUN", 3, 40 }, { "WAIT", 46, 40 }, { "TOK", 89, W - 89 - 3 }
+  };
+  char tokb[12]; char tunit = 0;
+  fmtTokens(tokb, sizeof(tokb), g_dispTokens, &tunit);
+  char tokv[14];
+  if (tunit) snprintf(tokv, sizeof(tokv), "%s%c", tokb, tunit);
+  else       snprintf(tokv, sizeof(tokv), "%s", tokb);
+  for (int i = 0; i < 3; i++) {
+    spr.fillRect(cells[i].x, STRIP_Y + 2, cells[i].w, STRIP_H - 4, DS_PANEL);
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, DS_PANEL);
+    spr.setCursor(cells[i].x + 3, STRIP_Y + 4);
+    spr.print(cells[i].l);
+    spr.setTextSize(2);
+    if (i == 0) {
+      spr.setTextColor(DS_GREEN, DS_PANEL);
+      spr.setCursor(cells[i].x + 3, STRIP_Y + 13);
+      spr.printf("%u", tama.sessionsRunning);
+    } else if (i == 1) {
+      spr.setTextColor(DS_WHITE, DS_PANEL);
+      spr.setCursor(cells[i].x + 3, STRIP_Y + 13);
+      spr.printf("%u", tama.sessionsWaiting);
+    } else {
+      spr.setTextColor(DS_ORANGE, DS_PANEL);
+      spr.setCursor(cells[i].x + 3, STRIP_Y + 13);
+      spr.print(tokv);
+    }
+  }
+
+  drawHomeTranscript(p, STRIP_Y + STRIP_H);
 }
 
 void setup() {
@@ -1901,6 +2190,117 @@ static void humanCostumeTick(uint32_t now) {
   spr.pushSprite(0, 0);
 }
 
+// ScreenAdapter — GPIO/logic-probe UI. Amber header ("ADAPTER" + PROBE dot),
+// then one inset row per probe pin with G<n> · mode · live value · edge glyph,
+// and a footer ("BtnB exit / 2Hz sample"). Live: digital pins are read with
+// digitalRead, the ADC pin (GPIO36) with analogRead → volts. Composes into
+// `spr`; adapterTick() handles the BtnB-exit, throttle, and blit.
+static void drawAdapter() {
+  // Probe set mirrors the M5StickC Plus header pins. 36 is ADC-only input.
+  struct Pin { uint8_t n; const char* mode; bool adc; };
+  static const Pin pins[] = {
+    { 26, "IN ", false }, { 36, "ADC", true }, { 0, "IN ", false }, { 32, "IN ", false }
+  };
+  const int NP = sizeof(pins) / sizeof(pins[0]);
+
+  spr.fillSprite(DS_BLACK);
+  // Header — amber band, ADAPTER (amber) + PROBE dot.
+  spr.fillRect(0, 0, W, 18, DS_ADPHDR);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_AMBER, DS_ADPHDR);
+  spr.setCursor(6, 5); spr.print("ADAPTER");
+  drawStatusDot(W - 44, 8, DS_AMBER, 3, true);
+  spr.setCursor(W - 36, 5); spr.print("PROBE");
+
+  // Pin rows.
+  int y = 24;
+  const int RH = 22;
+  for (int i = 0; i < NP; i++) {
+    int ry = y + i * RH;
+    spr.fillRect(4, ry, W - 8, RH - 3, DS_PANEL);
+    spr.drawRect(4, ry, W - 8, RH - 3, DS_LINE);
+    // G<n>
+    spr.setTextSize(2);
+    spr.setTextColor(DS_AMBER, DS_PANEL);
+    spr.setCursor(8, ry + 2);
+    spr.printf("G%u", pins[i].n);
+    // mode (size 1, dim)
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, DS_PANEL);
+    spr.setCursor(48, ry + 6);
+    spr.print(pins[i].mode);
+    // value + edge glyph
+    char val[10]; uint16_t vcol; const char* edge;
+    if (pins[i].adc) {
+      int raw = analogRead(pins[i].n);              // 0..4095 over ~0..3.3V
+      int mv = (raw * 3300) / 4095;
+      snprintf(val, sizeof(val), "%d.%02dV", mv / 1000, (mv % 1000) / 10);
+      vcol = DS_CYAN; edge = "~";
+    } else {
+      pinMode(pins[i].n, INPUT);
+      bool hi = digitalRead(pins[i].n);
+      snprintf(val, sizeof(val), "%s", hi ? "HI" : "LO");
+      vcol = hi ? DS_GREEN : DS_DIM; edge = hi ? "^" : ".";
+    }
+    spr.setTextSize(2);
+    spr.setTextColor(vcol, DS_PANEL);
+    spr.setCursor(76, ry + 2);
+    spr.print(val);
+    spr.setTextSize(1);
+    spr.setTextColor(DS_DIM, DS_PANEL);
+    spr.setCursor(W - 14, ry + 6);
+    spr.print(edge);
+  }
+
+  // Footer.
+  int fy = H - 14;
+  spr.fillRect(0, fy, W, 14, DS_DARK);
+  spr.drawFastHLine(0, fy, W, DS_LINE);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_DIM, DS_DARK);
+  spr.setCursor(6, fy + 4); spr.print("BtnB exit");
+  const char* fr = "2Hz sample";
+  spr.setCursor(W - 6 - (int)strlen(fr) * 6, fy + 4); spr.print(fr);
+}
+
+// ScreenStageUp — the stage-up celebration overlay. The celebrating character
+// is already composited into the middle of `spr`; this paints the top header
+// band (EVOLUTION / STAGE n / stage name in pink "ASCENDED" style) and the
+// bottom "DJ MODE!" payoff band, with a dark purple gradient tint top→bottom so
+// the celebrate scene reads as a special moment. Drawn over the live frame.
+static void drawStageUp(uint8_t stage) {
+  if (stage > 5) stage = 5;
+  // Top header band — gradient-ish dark purple.
+  const int TH = 40;
+  spr.fillRect(0, 0, W, TH, DS_SUTOP);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_AMBER, DS_SUTOP);
+  const char* el = "EVOLUTION";
+  spr.setCursor((W - (int)strlen(el) * 6) / 2, 3); spr.print(el);
+  spr.setTextSize(2);
+  spr.setTextColor(DS_WHITE, DS_SUTOP);
+  char sb[12]; snprintf(sb, sizeof(sb), "STAGE %u", stage);
+  spr.setCursor((W - (int)strlen(sb) * 12) / 2, 14); spr.print(sb);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_PINK, DS_SUTOP);
+  const char* name = (stage >= 5) ? "ASCENDED" : EVO_STAGE_NAMES[stage];
+  spr.setCursor((W - (int)strlen(name) * 6) / 2, 31); spr.print(name);
+  spr.drawFastHLine(0, TH, W, DS_PINK);
+
+  // Bottom payoff band.
+  const int BH = 30, BY = H - BH;
+  spr.fillRect(0, BY, W, BH, DS_SUBOT);
+  spr.drawFastHLine(0, BY, W, DS_PINK);
+  spr.setTextSize(2);
+  spr.setTextColor(DS_PINK, DS_SUBOT);
+  const char* dj = "DJ MODE!";
+  spr.setCursor((W - (int)strlen(dj) * 12) / 2, BY + 4); spr.print(dj);
+  spr.setTextSize(1);
+  spr.setTextColor(DS_DIM, DS_SUBOT);
+  const char* un = "unlocked";
+  spr.setCursor((W - (int)strlen(un) * 6) / 2, BY + 21); spr.print(un);
+}
+
 static void adapterTick(uint32_t now) {
   // On-device exit: BtnB (the top button) leaves adapter mode without a
   // reset, resuming BLE advertising. A reset also returns to pet mode.
@@ -1912,16 +2312,7 @@ static void adapterTick(uint32_t now) {
   static uint32_t last = 0;
   if (now - last < 500) return;              // light: ~2 Hz redraw
   last = now;
-  spr.fillSprite(TFT_BLACK);
-  spr.setTextColor(TFT_GREEN, TFT_BLACK);
-  spr.setTextSize(2); spr.setCursor(8, 24); spr.print("ADAPTER");
-  spr.setTextSize(1); spr.setTextColor(TFT_WHITE, TFT_BLACK);
-  spr.setCursor(8, 54); spr.print("GPIO / logic probe");
-  spr.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  spr.setCursor(8, 74); spr.print("pins 0 25 26");
-  spr.setCursor(8, 86); spr.print("     32 33 36");
-  spr.setTextColor(0x07FF, TFT_BLACK);
-  spr.setCursor(8, 110); spr.print("BtnB or reset: exit");
+  drawAdapter();
   spr.pushSprite(0, 0);
 }
 
@@ -2318,15 +2709,10 @@ void loop() {
     drawWifiIndicator();
     drawWifiPortalBanner();
     drawListeningIndicator();
-    // One-time Stage-5 "DJ MODE!" payoff banner (see djAnnounceUntil above).
+    // One-time Stage-5 stage-up celebration overlay (ScreenStageUp), shown for
+    // the ~3s djAnnounceUntil window over the celebrating character.
     if ((int32_t)(now - djAnnounceUntil) < 0) {
-      const Palette& p = characterPalette();
-      spr.fillRoundRect(8, 96, W - 16, 30, 5, p.body);
-      spr.drawRoundRect(8, 96, W - 16, 30, 5, 0xFFFF);
-      spr.setTextSize(2);
-      spr.setTextColor(p.bg, p.body);
-      spr.setCursor((W - 8 * 12) / 2, 104);
-      spr.print("DJ MODE!");
+      drawStageUp(evoStage());
     }
     spr.pushSprite(0, 0);
   }
