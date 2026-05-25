@@ -1766,6 +1766,29 @@ bool adapterMode = false;
 // DJ-booth scene flag — toggled by the "dj" Settings item (and elsewhere over
 // the transports/MCP). In-memory; the scene itself is rendered in gr0m.cpp.
 bool djMode = false;
+// DJ-booth scene renderer — lives in gr0m.cpp (to reach its file-static
+// draw primitives), composed onto the surface we pass in.
+extern void gr0mRenderDJ(TFT_eSPI*, uint32_t);
+
+// DJ mode tick — render the booth scene into the offscreen sprite and blit.
+// Mirrors adapterTick: BtnB exits without a reset. Runs AFTER dataPoll +
+// transport ticks in loop(), so MCP/serial can still toggle djMode off.
+static void djTick(uint32_t now) {
+  if (M5.BtnB.wasPressed()) {
+    djMode = false;
+    characterInvalidate();
+    return;
+  }
+  spr.fillSprite(TFT_BLACK);
+  gr0mRenderDJ(&spr, now);
+  // Exit hint, bottom-left, dim cyan.
+  spr.setTextSize(1);
+  spr.setTextColor(0x07FF, TFT_BLACK);
+  spr.setCursor(4, H - 10);
+  spr.print("BtnB: exit");
+  spr.pushSprite(0, 0);
+}
+
 static void adapterTick(uint32_t now) {
   // On-device exit: BtnB (the top button) leaves adapter mode without a
   // reset, resuming BLE advertising. A reset also returns to pet mode.
@@ -1870,6 +1893,12 @@ void loop() {
   // serviced above (dataPoll + transports); skip the pet animation, mic, and
   // normal UI. A reset clears adapterMode and returns to BT/WiFi pet mode.
   if (adapterMode) { adapterTick(now); return; }
+
+  // DJ mode: full-detail "gr0m on the decks" scene. Same placement as the
+  // adapter short-circuit — commands were just serviced (dataPoll + transports
+  // above), so MCP/serial can still toggle djMode off while it runs. BtnB
+  // (inside djTick) or a reset exits.
+  if (djMode) { djTick(now); return; }
 
   // Knock-to-approve: only acts during a permission prompt. 1 knock =
   // approve, 2+ knocks = deny. Outcome telemetry is owned by mic.cpp;
@@ -2000,6 +2029,19 @@ void loop() {
   clockRefreshRtc();   // 1Hz internal throttle; also caches _onUsb
   g_evoStage   = evoStage();      // refresh the mirrors gr0m.cpp renders from
   g_dispTokens = stats().tokens;
+
+  // Stage-5 DJ-unlock announce (one-time per boot). statsSetTokens latches
+  // _djUnlocked the first time the character reaches Stage 5; when we observe
+  // that edge live, play a brief celebration. djMode itself is toggleable from
+  // day one regardless of stage — this is purely the bonus payoff.
+  static bool djWasUnlocked = statsDjUnlocked();
+  static uint32_t djAnnounceUntil = 0;
+  if (!djWasUnlocked && statsDjUnlocked()) {
+    djWasUnlocked = true;
+    djAnnounceUntil = now + 3000;
+    triggerOneShot(P_CELEBRATE, 3000);
+    beep(2400, 120);
+  }
   // Show the clock when nothing is happening — bridge heartbeat alone
   // doesn't count as activity (it's the only way to get the RTC synced).
   bool clocking = displayMode == DISP_NORMAL
@@ -2093,6 +2135,16 @@ void loop() {
     drawWifiIndicator();
     drawWifiPortalBanner();
     drawListeningIndicator();
+    // One-time Stage-5 "DJ MODE!" payoff banner (see djAnnounceUntil above).
+    if ((int32_t)(now - djAnnounceUntil) < 0) {
+      const Palette& p = characterPalette();
+      spr.fillRoundRect(8, 96, W - 16, 30, 5, p.body);
+      spr.drawRoundRect(8, 96, W - 16, 30, 5, 0xFFFF);
+      spr.setTextSize(2);
+      spr.setTextColor(p.bg, p.body);
+      spr.setCursor((W - 8 * 12) / 2, 104);
+      spr.print("DJ MODE!");
+    }
     spr.pushSprite(0, 0);
   }
 

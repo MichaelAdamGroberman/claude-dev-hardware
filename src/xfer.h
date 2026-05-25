@@ -231,6 +231,20 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  // DJ-booth scene — a toggleable full-detail "gr0m on the decks" animation
+  // (turntables, mixer, VU-meter visor, note particles) driven by an internal
+  // beat. In-memory only: a reset returns to the normal pet. Mutually exclusive
+  // with adapter mode (enabling DJ clears adapter, since both own the screen).
+  //   {"cmd":"dj","on":true|false}
+  if (strcmp(cmd, "dj") == 0) {
+    extern bool djMode, adapterMode;
+    bool on = doc["on"] | true;
+    djMode = on;
+    if (on) adapterMode = false;
+    _xAck("dj", on);
+    return true;
+  }
+
   // GPIO / mini logic-analyzer on the exposed header pins. Restricted to
   // pins that aren't wired to the display/IMU/buttons/IR/mic so we can't
   // brick the device. Replies with {"ack":"gpio",...} carrying the result.

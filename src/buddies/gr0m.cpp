@@ -1174,6 +1174,174 @@ static void drawChestLCD(const char* text) {
   _t->print(text);
 }
 
+// ════════════════════════════════════════════════════════════════════
+//   DJ MODE — "gr0m on the decks" booth scene (bonus, not a mood-state)
+// ────────────────────────────────────────────────────────────────────
+//   A standalone full-detail scene driven by a deterministic internal
+//   beat (~124 BPM). NOT evolution-gated — it's a mode, not a pet stage.
+//   The beat envelope (1.0 on the kick, decaying to ~0 between beats)
+//   drives the head-bob, VU-bar heights, antenna pulse, crossfader slide
+//   and the right-deck "scratch" jitter. No mic / no real audio.
+// ════════════════════════════════════════════════════════════════════
+
+static const uint32_t DJ_BPM       = 124;
+static const uint32_t DJ_BEAT_MS   = 60000UL / DJ_BPM;   // ~484 ms per beat
+
+// Club-lighting palette the VU bars + notes cycle through.
+static const uint16_t DJ_COLORS[6] = {
+  0xF800, 0xFD20, 0xFFE0, 0x07E0, 0x05FF, 0xF81F
+};
+
+// Beat envelope in 0..255: 255 right on the kick, decaying toward 0
+// across the beat. `phaseMs` is how far we are into the current beat.
+static uint8_t djBeatEnvelope(uint32_t phaseMs) {
+  // Linear decay over the first ~70% of the beat, flat-zero after.
+  uint32_t span = (DJ_BEAT_MS * 7) / 10;
+  if (phaseMs >= span) return 0;
+  return (uint8_t)(255 - (phaseMs * 255) / span);
+}
+
+// One turntable: platter rim, vinyl grooves, center label, and a rotating
+// radial mark whose angle is supplied by the caller (steady spin on the
+// left deck, beat-driven jitter on the right). cx/cy = platter center.
+static void drawTurntable(int cx, int cy, float angle) {
+  const int R = 16;
+  // Platter body + rim
+  _t->fillCircle(cx, cy, R, 0x2104);
+  _t->drawCircle(cx, cy, R, STEEL);
+  _t->drawCircle(cx, cy, R - 1, CHASSIS_SH);
+  // Vinyl grooves
+  _t->drawCircle(cx, cy, 12, 0x4208);
+  _t->drawCircle(cx, cy, 9,  0x39E7);
+  // Center label (gr0m red) + spindle
+  _t->fillCircle(cx, cy, 5, CRIMSON);
+  _t->drawCircle(cx, cy, 5, SPECULAR);
+  _t->fillCircle(cx, cy, 1, INK);
+  // Rotating radial mark — tells you it's spinning.
+  int mx = cx + (int)(cosf(angle) * (R - 2));
+  int my = cy + (int)(sinf(angle) * (R - 2));
+  _t->drawLine(cx, cy, mx, my, SPECULAR);
+  // Tonearm stub anchored at the upper-right of the platter.
+  _t->drawLine(cx + R, cy - R, cx + 3, cy - 3, CHASSIS_HI);
+  _t->fillCircle(cx + R, cy - R, 2, STEEL);
+}
+
+// The mixer between the two decks: two short channel faders, a crossfader
+// that slides L↔R on the beat, and a pair of EQ knobs. `slide` is 0..255
+// (the beat envelope) and positions the crossfader cap.
+static void drawMixer(int cx, int cy, uint8_t slide) {
+  const int mw = 34, mh = 30;
+  int mx = cx - mw / 2, my = cy - mh / 2;
+  _t->fillRoundRect(mx, my, mw, mh, 3, 0x18C3);
+  _t->drawRoundRect(mx, my, mw, mh, 3, CHASSIS_SH);
+  // Two channel faders (vertical slots) with caps near the top.
+  for (int i = 0; i < 2; i++) {
+    int fx = mx + 7 + i * 14;
+    _t->drawFastVLine(fx, my + 4, 12, CHASSIS_SH);
+    int cap = my + 5 + ((i == 0) ? (slide >> 6) : (3 - (slide >> 6)));
+    _t->fillRect(fx - 2, cap, 5, 2, DJ_COLORS[i ? 4 : 3]);
+  }
+  // EQ knobs.
+  _t->fillCircle(mx + 7, my + 22, 2, STEEL);
+  _t->fillCircle(mx + 21, my + 22, 2, STEEL);
+  _t->drawPixel(mx + 7, my + 21, SPECULAR);
+  // Crossfader — horizontal slot near the bottom, cap slides L↔R on beat.
+  int slotX = mx + 6, slotW = mw - 12, slotY = my + mh - 4;
+  _t->drawFastHLine(slotX, slotY, slotW, CHASSIS_SH);
+  int capX = slotX + (slide * (slotW - 4)) / 255;
+  _t->fillRect(capX, slotY - 2, 4, 5, 0x05FF);
+}
+
+// ♪/♫ note particles rising on the left + right of the booth. Glyph and
+// color cycle so it reads as a lively club. `t` advances the rise; `beat`
+// gives an upward kick on each downbeat.
+static void drawNotes(uint32_t t, uint8_t beat) {
+  _t->setTextSize(1);
+  for (int i = 0; i < 5; i++) {
+    int phase = ((int)(t / 40) * 2 + i * 9) % 60;
+    int baseX = (i & 1) ? (110 - i * 4) : (18 + i * 5);
+    int y = 118 - phase - (beat >> 5);
+    if (y < 2) continue;
+    int x = baseX + (((phase / 4) & 1) ? 2 : -2);
+    _t->setTextColor(DJ_COLORS[(i + (t / 200)) % 6], BUDDY_BG);
+    _t->setCursor(x, y);
+    // Single/double note glyphs from the default font's printable set.
+    _t->print((i & 1) ? "\x0e" : "\x0d");   // ♫ / ♪ in the 8x8 ROM font
+  }
+}
+
+// gr0mRenderDJ scene body — composed onto whatever surface _t points at.
+// Called from the global trampoline below (which sets _t = tgt first).
+static void djScene(uint32_t t) {
+  readTilt();   // keep the head parallax alive even in DJ mode
+
+  uint32_t phaseMs = t % DJ_BEAT_MS;
+  uint8_t  beat    = djBeatEnvelope(phaseMs);
+  uint32_t beatNum = t / DJ_BEAT_MS;
+
+  // Head bob: dip down hard on the kick, spring back between beats.
+  _yProjOff = -(beat >> 6);   // 0..-3 px
+
+  // ── Decks + mixer (drawn first, behind the head/hands) ──────────────
+  // Left deck spins steadily; right deck "scratches" — its angle jitters
+  // back and forth on the beat instead of advancing smoothly.
+  float spin    = (float)t * 0.012f;
+  float scratch = spin + sinf((float)t * 0.05f) * (beat / 255.0f) * 2.2f;
+  drawTurntable(26, 132, spin);
+  drawTurntable(109, 132, scratch);
+  // Crossfader rides L→R→L across two beats so it visibly travels.
+  uint8_t slide = (beatNum & 1) ? (255 - beat) : beat;
+  drawMixer(HX, 138, slide);
+
+  // ── Hands on the decks — reuse the laptop-hands stubs, splayed wider
+  // so they read as resting on the platters; right hand tracks scratch.
+  {
+    int ly = 120, ry = 120 + (beat >> 6);
+    _t->drawLine(HX - 16, HY + 30, 30, ly, CHASSIS_SH);
+    _t->drawLine(HX + 16, HY + 30, 105, ry, CHASSIS_SH);
+    _t->fillCircle(30, ly, 3, CHASSIS);  _t->drawCircle(30, ly, 3, CHASSIS_SH);
+    _t->fillCircle(105, ry, 3, CHASSIS); _t->drawCircle(105, ry, 3, CHASSIS_SH);
+  }
+
+  // ── gr0m head, bobbing, with headphones on ──────────────────────────
+  drawHead3D();
+  // Visor as a VU meter: 6 vertical bars with per-bar beat-driven heights
+  // and cycling club colors (replaces the normal pupil). Drawn on the
+  // front face so it rides the head rotation.
+  if (frontFaceVisible()) {
+    V2 vtl = onFace(-18, -7);
+    V2 vbr = onFace( 18,  6);
+    int vx = vtl.x, vy = vtl.y;
+    int vw = vbr.x - vtl.x, vh = vbr.y - vtl.y;
+    if (vw < 6) vw = 6;
+    // Recessed frame
+    _t->fillRect(vx - 1, vy - 1, vw + 2, vh + 2, INK);
+    _t->fillRect(vx, vy, vw, vh, 0x0841);
+    const int N = 6;
+    int bw = vw / N;
+    for (int i = 0; i < N; i++) {
+      // Each bar's height is a phase-shifted slice of the beat envelope.
+      uint8_t bv = djBeatEnvelope((phaseMs + i * (DJ_BEAT_MS / N)) % DJ_BEAT_MS);
+      int bh = 2 + (bv * (vh - 2)) / 255;
+      int bx = vx + i * bw + 1;
+      _t->fillRect(bx, vy + vh - bh, bw - 1, bh, DJ_COLORS[(i + beatNum) % 6]);
+    }
+  }
+  drawHeadphones();   // full-scale only (early-returns at scale 1)
+  // Antenna LED pulses on the beat.
+  drawAntenna3D(beat > 80 ? DJ_COLORS[beatNum % 6] : 0);
+
+  // ── Note particles + BPM readout ────────────────────────────────────
+  drawNotes(t, beat);
+  // "124" BPM chest readout — small green LCD-style tag.
+  _t->setTextSize(1);
+  _t->fillRect(HX - 12, 160, 24, 11, INK);
+  _t->fillRect(HX - 11, 161, 22, 9, 0x02E0);
+  _t->setTextColor(0x5FE0, 0x02E0);
+  _t->setCursor(HX - 8, 162);
+  _t->print("124");
+}
+
 // ── States ──────────────────────────────────────────────────────────
 
 static void doSleep(uint32_t t) {
@@ -1331,6 +1499,15 @@ static void doHeart(uint32_t t) {
 }
 
 }  // namespace gr0m
+
+// DJ-booth scene entry point — global so main.cpp's djTick can call it
+// without touching the gr0m namespace internals. Points the namespace's
+// active render surface at `tgt` (mirrors how each state function does
+// `_t = buddyTarget()`), then composes the scene. `t` is millis().
+void gr0mRenderDJ(TFT_eSPI* tgt, uint32_t t) {
+  gr0m::_t = tgt;
+  gr0m::djScene(t);
+}
 
 extern const Species GR0M_SPECIES = {
   "gr0m",
