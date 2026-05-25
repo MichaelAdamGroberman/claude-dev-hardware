@@ -124,17 +124,16 @@ TOOLS = [
 def _daemon(req: dict, timeout: float = 35.0) -> dict:
     """Send one request line to the daemon socket, return the JSON reply."""
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        s.connect(str(SOCK_PATH))
-        s.sendall((json.dumps(req) + "\n").encode())
-        buf = b""
-        while b"\n" not in buf:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
-        s.close()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect(str(SOCK_PATH))
+            s.sendall((json.dumps(req) + "\n").encode())
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
         return json.loads(buf.decode().splitlines()[0]) if buf else {}
     except (FileNotFoundError, ConnectionRefusedError, socket.error):
         return {"error": "buddy daemon not running"}
