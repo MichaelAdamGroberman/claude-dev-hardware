@@ -78,6 +78,17 @@ for setup details see **[tools/cc-bridge/README.md](tools/cc-bridge/README.md)**
 > **Design notes:** [docs/superpowers/specs/](docs/superpowers/specs/) has the
 > full evolution / DJ / menu design spec.
 
+## Screens & character
+
+The redesigned device screens (approval prompt, pet stats, clock, menus,
+pairing) and the gr0m character's mood/evolution states. A live, interactive
+version of this showcase is published via GitHub Pages (see
+[`index.html`](index.html)).
+
+<p align="center">
+  <img src="docs/screens.png" alt="gr0m Developer Hardware Buddy — redesigned device screens and character states" width="660">
+</p>
+
 ## Hardware
 
 The firmware targets ESP32 with the Arduino framework. As written, it
