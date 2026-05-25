@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hardware Buddy Dashboard · gr0m</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Hardware Buddy maker dashboard — live device mirror, permission prompts, activity stream, pet stats, character library, and device tools for the M5StickC Plus desk pet.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=DM+Mono:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── reset & design tokens (matches repo index.html palette) ─── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#efe9dd;
+  --ink:#1a1612;
+  --ink2:#3a342e;
+  --ink-dim:#6b6358;
+  --ink-faint:#a39b8e;
+  --paper:#fbf6ef;
+  --paper2:#f5ebe0;
+  --paper3:#efe2d3;
+  --coral:#d97757;
+  --coral-dim:#e7a48a;
+  --coral-soft:#f5d9c8;
+  --success:#2e9e5b;
+  --danger:#c83a3a;
+  --info:#3f6ea8;
+  --warning:#ec8a3a;
+  --card:#ffffff;
+  --cl:rgba(20,16,12,0.08);
+  --cl2:rgba(20,16,12,0.05);
+}
+
+html,body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  font-size:16px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  min-width:360px;
+}
+
+/* ── page layout ─────────────────────────────────────────────── */
+.page-header{
+  text-align:center;
+  padding:48px 24px 36px;
+  border-bottom:1px solid var(--cl);
+  background:linear-gradient(180deg,var(--paper2) 0%,var(--bg) 100%);
+}
+.page-header h1{
+  font-family:"Silkscreen",monospace;
+  font-size:clamp(20px,4vw,36px);
+  font-weight:700;
+  color:var(--ink);
+  letter-spacing:-0.5px;
+  line-height:1.15;
+}
+.page-header h1 .accent{color:var(--coral)}
+.page-header .sub{
+  font-family:"DM Mono",monospace;
+  font-size:clamp(11px,1.6vw,13px);
+  color:var(--ink-dim);
+  margin:10px auto 0;
+  max-width:520px;
+  line-height:1.6;
+}
+.badge-row{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-top:18px}
+.badge{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 10px;border-radius:999px;
+  background:var(--paper2);color:var(--ink-dim);
+  font-size:11px;font-weight:500;
+  border:1px solid rgba(20,16,12,.10);
+}
+.badge.live{background:#eaf7ee;color:var(--success)}
+.badge.alert{background:#fff0ee;color:var(--coral)}
+.badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor}
+
+.stage-wrap{
+  padding:28px 20px 48px;
+  max-width:1480px;
+  margin:0 auto;
+}
+
+/* ── the macOS-style window shell ────────────────────────────── */
+.window-stage{
+  background:linear-gradient(180deg,#d4c4ad 0%,#b8a48a 60%,#8a7559 100%);
+  border-radius:16px;
+  padding:20px;
+  overflow-x:auto;
+}
+
+.bw{
+  background:var(--paper);
+  border-radius:14px;
+  overflow:hidden;
+  min-width:840px;
+  box-shadow:0 30px 60px -20px rgba(20,16,12,.25),0 0 0 1px rgba(20,16,12,.06);
+  display:flex;
+  flex-direction:column;
+  font-size:13px;
+  color:var(--ink);
+}
+
+/* title bar */
+.titlebar{
+  height:38px;
+  background:linear-gradient(180deg,#f5ebe0 0%,#ebe1d4 100%);
+  border-bottom:1px solid var(--cl);
+  display:flex;
+  align-items:center;
+  padding:0 14px;
+  gap:8px;
+  position:relative;
+  flex-shrink:0;
+  user-select:none;
+}
+.tls{display:flex;gap:6px}
+.tl{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.1)}
+.tl-r{background:#ff5f57}
+.tl-y{background:#febc2e}
+.tl-g{background:#28c840}
+.tb-center{
+  position:absolute;left:0;right:0;text-align:center;
+  font-size:13px;font-weight:600;color:var(--ink2);
+  pointer-events:none;
+}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.devmode-pill{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 8px;border-radius:999px;
+  font-size:11px;font-weight:500;color:var(--ink-dim);
+  background:transparent;border:none;cursor:default;
+}
+.tb-right .settings-btn{
+  background:transparent;border:none;
+  font-size:16px;color:var(--ink-dim);cursor:pointer;padding:2px 4px;
+  border-radius:4px;transition:background .12s;
+}
+.tb-right .settings-btn:hover{background:var(--paper2)}
+.tb-right .settings-btn:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+
+/* 3-column body */
+.bw-body{
+  display:grid;
+  grid-template-columns:268px 1fr 268px;
+  gap:12px;
+  padding:12px;
+  background:var(--paper);
+  min-height:0;
+}
+
+/* columns */
+.col{display:flex;flex-direction:column;gap:12px}
+
+/* ── card ─────────────────────────────────────────────────────── */
+.card{
+  background:var(--card);
+  border-radius:12px;
+  border:1px solid var(--cl);
+  box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 1px 3px rgba(20,16,12,.04);
+  overflow:hidden;
+}
+.ch{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:13px 14px 9px;
+  border-bottom:1px solid var(--cl2);
+  flex-shrink:0;
+}
+.ch-t{
+  font-size:11px;font-weight:600;
+  color:var(--ink-dim);letter-spacing:1.5px;text-transform:uppercase;
+}
+.ch-h{font-size:11px;color:var(--ink-faint)}
+
+/* ── pill ─────────────────────────────────────────────────────── */
+.pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 8px;border-radius:999px;
+  background:var(--paper2);color:var(--ink-dim);
+  font-size:11px;font-weight:500;line-height:1;white-space:nowrap;
+}
+.pdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* ── LEFT column ─────────────────────────────────────────────── */
+
+/* device mirror card */
+.mirror-card{
+  display:flex;flex-direction:column;align-items:center;
+  padding:14px 12px 12px;
+}
+.mirror-top{
+  display:flex;justify-content:space-between;
+  align-items:center;width:100%;margin-bottom:10px;
+}
+
+/* M5StickC pixel replica — keeps the red enclosure look */
+.m5-device{
+  width:118px;flex-shrink:0;
+  display:flex;flex-direction:column;align-items:center;
+  position:relative;
+}
+.m5-body{
+  width:96px;background:#c5140a;border-radius:10px;
+  padding:8px 6px;
+  box-shadow:0 4px 16px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,120,100,.3);
+  position:relative;
+}
+.m5-screen{
+  width:84px;height:136px;
+  background:#000;border-radius:3px;
+  overflow:hidden;
+  font-family:"Silkscreen",monospace;
+  font-size:0;
+  position:relative;
+  border:1px solid #1a0a08;
+}
+.m5-brand{
+  text-align:center;margin-top:6px;
+  font-family:"Silkscreen",monospace;font-size:8px;
+  color:#a82020;letter-spacing:2px;
+}
+.m5-btn-a{
+  position:absolute;right:-10px;top:28px;
+  width:10px;height:22px;background:#aa1208;border-radius:0 3px 3px 0;
+  box-shadow:inset -1px 0 0 rgba(255,255,255,.1);
+}
+.m5-btn-b{
+  position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+  width:22px;height:8px;background:#aa1208;border-radius:3px;
+  box-shadow:inset 0 -1px 0 rgba(0,0,0,.3);
+}
+.m5-led{
+  position:absolute;right:8px;top:6px;
+  width:5px;height:5px;border-radius:50%;
+  background:#ff2a1a;
+  box-shadow:0 0 6px #ff2a1a;
+}
+
+/* screen content inside .m5-screen */
+.scr{
+  font-family:"Silkscreen",monospace;
+  width:100%;height:100%;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  font-size:12px;line-height:1;
+}
+.scr *{line-height:1 !important;box-sizing:border-box}
+.scr-alarm{
+  background:#ff2a1a;color:#000;
+  padding:4px 5px;
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:11px;font-weight:700;flex-shrink:0;
+}
+.scr-alarm-r{font-family:"DM Mono",monospace;font-size:9px}
+.scr-tool-b{padding:6px 5px 3px;flex-shrink:0}
+.scr-tool-l{font-size:9px;color:#ff8c1a;letter-spacing:1px;font-weight:700}
+.scr-tool-n{font-size:30px;font-weight:700;color:#fff}
+.scr-cmd-a{padding:4px 5px;flex:1}
+.scr-cmd-l{font-size:9px;color:#7a8492;letter-spacing:1px;font-weight:700}
+.scr-cmd-t{font-family:"DM Mono",monospace;font-size:10px;color:#fff;margin-top:3px;word-break:break-all}
+.scr-running{
+  padding:3px 5px;font-size:9px;color:#5cff7a;
+  font-weight:700;letter-spacing:.5px;flex-shrink:0;
+}
+.scr-act-row{display:flex;flex-shrink:0}
+.scr-allow{
+  flex:1;background:#0a3a18;color:#5cff7a;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:7px 0;border-right:1px solid #000;
+}
+.scr-deny{
+  flex:1;background:#3a0a08;color:#ff6e5b;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:7px 0;
+}
+.scr-ai{font-size:18px;font-weight:700}
+.scr-al{font-size:8px;letter-spacing:1px;font-weight:700;margin-top:2px}
+
+/* mirror identity row */
+.mirror-id{width:100%;margin-top:12px}
+.mirror-name{
+  display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:6px;
+}
+.mirror-name strong{font-size:14px;font-weight:700}
+.mirror-name code{
+  font-family:"DM Mono",monospace;font-size:10px;color:var(--ink-faint);
+}
+.mirror-pills{display:flex;gap:4px;flex-wrap:wrap}
+
+/* pet stats */
+.pet-body{padding:10px 14px 13px}
+.pet-sg{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
+  margin-bottom:10px;
+}
+.st .st-l{
+  font-size:10px;color:var(--ink-faint);
+  letter-spacing:1px;text-transform:uppercase;font-weight:600;
+}
+.st .st-v{
+  font-size:18px;font-weight:700;line-height:1;
+  letter-spacing:-0.5px;margin-top:2px;
+}
+.st .st-s{font-size:10px;color:var(--ink-dim);margin-left:2px}
+.hdiv{height:1px;background:var(--cl2);margin:8px 0}
+.pet-mr{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+.pet-mr:last-child{margin-bottom:0}
+.pet-ml{
+  font-size:10px;font-weight:600;color:var(--ink-faint);
+  letter-spacing:1px;text-transform:uppercase;
+  width:44px;flex-shrink:0;
+}
+.pet-mt{display:flex;gap:3px;flex:1}
+.pet-seg{flex:1;height:7px;border-radius:2px}
+.pet-mv{
+  font-family:"DM Mono",monospace;font-size:10px;
+  color:var(--ink-dim);width:24px;text-align:right;flex-shrink:0;
+}
+
+/* ── CENTER column ───────────────────────────────────────────── */
+
+/* today stats strip */
+.stats-strip{padding:12px 14px 4px;display:flex;justify-content:space-between;align-items:baseline}
+.ss-lbl{font-size:11px;font-weight:600;color:var(--ink-dim);letter-spacing:1.5px;text-transform:uppercase}
+.ss-h{font-size:11px;color:var(--ink-faint)}
+.stats-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  gap:10px;padding:2px 14px 10px;align-items:end;
+}
+
+/* sparkline */
+.spark-wrap{padding:0 8px 8px}
+
+/* permission prompt */
+.appr-inner{
+  background:linear-gradient(180deg,#fff7ec 0%,#ffe6cc 100%);
+  border-radius:10px;border:1px solid var(--coral-dim);
+  padding:13px 13px;margin:11px 13px 13px;
+  position:relative;overflow:hidden;
+}
+.appr-stripe{
+  position:absolute;top:0;left:0;bottom:0;
+  width:4px;background:var(--coral);
+}
+.appr-hdr{display:flex;justify-content:space-between;align-items:center}
+.appr-alert{
+  font-size:10px;font-weight:700;letter-spacing:1.5px;
+  color:var(--coral);text-transform:uppercase;
+}
+.appr-time{font-family:"DM Mono",monospace;font-size:11px;color:var(--ink-dim)}
+.appr-tool{display:flex;align-items:baseline;gap:8px;margin-top:5px}
+.appr-tool strong{font-size:18px;font-weight:700;color:var(--ink)}
+.appr-cmd{
+  font-family:"DM Mono",monospace;font-size:11px;color:var(--ink2);
+  padding:2px 5px;background:rgba(255,255,255,.55);border-radius:4px;
+}
+.appr-btns{display:flex;gap:7px;margin-top:10px}
+.appr-btns button{
+  flex:1;padding:8px 10px;border-radius:8px;
+  font-size:12px;font-weight:600;cursor:pointer;border:none;
+  transition:opacity .12s;
+}
+.appr-btns button:hover{opacity:.88}
+.appr-btns button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btn-allow{
+  background:var(--success);color:#fff;
+  box-shadow:0 1px 0 rgba(0,0,0,.08),0 -1px 0 rgba(255,255,255,.2) inset;
+}
+.btn-deny{
+  background:#fff;color:var(--danger);
+  border:1px solid var(--danger) !important;
+}
+.appr-hint{font-size:10px;color:var(--ink-dim);margin-top:7px}
+
+/* activity log */
+.act-card{flex:1;display:flex;flex-direction:column;min-height:200px}
+.act-scroll{overflow-y:auto;flex:1;max-height:240px}
+.act-row{
+  display:flex;gap:7px;padding:5px 13px;
+  border-top:1px solid var(--cl2);align-items:baseline;
+}
+.act-row:first-child{border-top:none}
+.act-t{
+  font-family:"DM Mono",monospace;font-size:10px;
+  color:var(--ink-faint);width:50px;flex-shrink:0;
+}
+.act-k{
+  font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  padding:2px 4px;border-radius:3px;
+  width:42px;text-align:center;flex-shrink:0;
+}
+.act-tx{font-size:11px;color:var(--ink);line-height:1.4}
+
+/* ── RIGHT column ────────────────────────────────────────────── */
+
+/* active character */
+.char-prev{display:flex;align-items:center;gap:9px;padding:12px 13px}
+.char-thumb{
+  width:56px;height:48px;background:#11161e;border-radius:8px;overflow:hidden;
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+}
+.char-info strong{font-size:13px;font-weight:700}
+.char-info p{font-size:10px;color:var(--ink-dim);margin-top:2px}
+.char-btns{display:flex;gap:5px;padding:0 13px 11px}
+.btn-g{
+  flex:1;padding:5px 7px;border-radius:6px;
+  background:#fff;border:1px solid var(--cl);color:var(--ink2);
+  font-size:11px;cursor:pointer;transition:background .12s;
+}
+.btn-g:hover{background:var(--paper2)}
+.btn-g:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+.btn-p{
+  flex:1;padding:5px 7px;border-radius:6px;
+  background:var(--coral);border:none;color:#fff;
+  font-size:11px;font-weight:600;cursor:pointer;transition:opacity .12s;
+}
+.btn-p:hover{opacity:.88}
+.btn-p:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* character library grid */
+.char-lib{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:6px;padding:10px 13px 7px;
+}
+.sp-tile{display:flex;flex-direction:column;gap:3px}
+.sp-thumb{
+  height:50px;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:"Silkscreen",monospace;font-size:13px;line-height:1;
+  border:1px solid var(--cl);overflow:hidden;cursor:pointer;
+  transition:border-color .12s,box-shadow .12s;
+}
+.sp-thumb:hover{border-color:var(--coral-dim)}
+.sp-thumb.active{
+  border:2px solid var(--coral);
+  box-shadow:0 0 0 3px var(--coral-soft);
+}
+.sp-name{font-size:10px;font-weight:500;color:var(--ink2);padding-left:2px}
+.sp-name.active{font-weight:700;color:var(--ink)}
+
+/* drop zone */
+.char-drop{
+  margin:5px 13px 11px;padding:14px 8px;
+  border-radius:10px;border:2px dashed var(--coral-dim);
+  background:linear-gradient(180deg,#fff7ec 0%,#ffe6cc 100%);
+  text-align:center;color:var(--ink-dim);cursor:pointer;
+  transition:border-color .15s,background .15s;
+}
+.char-drop:hover,.char-drop:focus-visible{
+  border-color:var(--coral);
+  background:linear-gradient(180deg,#ffe8d0 0%,#ffd6aa 100%);
+  outline:none;
+}
+.char-drop-plus{font-size:18px;margin-bottom:4px}
+.char-drop-t{font-size:11px;font-weight:600;color:var(--ink2)}
+.char-drop-s{font-size:10px;margin-top:2px}
+
+/* device tools */
+.tools-l{padding:5px 13px 11px}
+.tool-btn{
+  display:flex;align-items:center;gap:7px;width:100%;
+  padding:6px 4px;background:transparent;border:none;
+  color:var(--ink);font-size:11px;text-align:left;
+  cursor:pointer;border-radius:6px;transition:background .12s;
+}
+.tool-btn:hover{background:var(--paper2)}
+.tool-btn:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+.tool-btn.danger{color:var(--danger)}
+.ti{width:15px;flex-shrink:0;color:var(--ink-dim);font-style:normal}
+.tool-btn.danger .ti{color:var(--danger)}
+.tarr{margin-left:auto;color:var(--ink-faint);font-size:10px}
+
+/* ── page footer ─────────────────────────────────────────────── */
+.page-footer{
+  text-align:center;padding:32px 24px 48px;
+  font-size:11px;color:var(--ink-faint);
+  font-family:"DM Mono",monospace;
+  border-top:1px solid var(--cl);
+}
+.page-footer a{color:var(--coral);text-decoration:none}
+.page-footer a:hover{text-decoration:underline}
+
+/* ── focus visible global ─────────────────────────────────────── */
+:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+
+/* ── responsive ───────────────────────────────────────────────── */
+@media(max-width:1100px){
+  .bw-body{grid-template-columns:240px 1fr 240px}
+}
+@media(max-width:900px){
+  .bw-body{grid-template-columns:1fr}
+  .bw{min-width:680px}
+}
+@media(max-width:640px){
+  .stage-wrap{padding:16px 12px 40px}
+  .window-stage{padding:12px}
+  .bw{min-width:580px}
+}
+@media(max-width:480px){
+  .page-header{padding:32px 16px 28px}
+}
+</style>
+</head>
+<body>
+
+<!-- ── page header ──────────────────────────────────────────────── -->
+<header class="page-header" role="banner">
+  <h1><span class="accent">gr0m</span> · Hardware Buddy Dashboard</h1>
+  <p class="sub">Live device mirror, permission prompts, activity stream, and character management for the M5StickC Plus desk pet.</p>
+  <div class="badge-row" aria-label="Status badges">
+    <span class="badge live"><span class="dot" aria-hidden="true"></span> Live device pairing</span>
+    <span class="badge">M5StickC Plus</span>
+    <span class="badge">ESP32 / PlatformIO</span>
+    <span class="badge alert">claude-dev-hardware</span>
+    <span class="badge">Static mockup</span>
+  </div>
+</header>
+
+<!-- ── dashboard window ─────────────────────────────────────────── -->
+<main class="stage-wrap" role="main">
+  <div class="window-stage" role="region" aria-label="Hardware Buddy desktop window mockup">
+    <div class="bw">
+
+      <!-- macOS title bar -->
+      <div class="titlebar">
+        <div class="tls" aria-hidden="true">
+          <div class="tl tl-r"></div>
+          <div class="tl tl-y"></div>
+          <div class="tl tl-g"></div>
+        </div>
+        <div class="tb-center" aria-hidden="true">Hardware Buddy &amp; Maker Devices</div>
+        <div class="tb-right">
+          <span class="devmode-pill" aria-label="Developer mode active">
+            <span aria-hidden="true">⌘</span> dev mode
+          </span>
+          <button class="settings-btn" aria-label="Open settings" title="Settings">&#9881;</button>
+        </div>
+      </div>
+
+      <!-- 3-col body -->
+      <div class="bw-body">
+
+        <!-- ════════════════════════
+             LEFT: device mirror + pet
+             ════════════════════════ -->
+        <div class="col">
+
+          <!-- mirror card -->
+          <div class="card mirror-card">
+            <div class="mirror-top">
+              <span class="pill" style="background:#eaf7ee;color:var(--success)">
+                <span class="pdot" style="background:var(--success)" aria-hidden="true"></span>
+                LIVE
+              </span>
+              <span class="pill">
+                <span style="font-family:'DM Mono',monospace">2.3s</span>&nbsp;ago
+              </span>
+            </div>
+
+            <!-- M5StickC device replica -->
+            <div class="m5-device" role="img" aria-label="M5StickC Plus showing approval screen">
+              <div class="m5-body">
+                <div class="m5-led" aria-hidden="true"></div>
+                <div class="m5-btn-a" aria-hidden="true"></div>
+                <!-- screen -->
+                <div class="m5-screen">
+                  <div class="scr">
+                    <!-- alarm bar -->
+                    <div class="scr-alarm">
+                      <span>APPROVE?</span>
+                      <span class="scr-alarm-r">3s</span>
+                    </div>
+                    <!-- tool label -->
+                    <div class="scr-tool-b">
+                      <div class="scr-tool-l">TOOL</div>
+                      <div class="scr-tool-n">Bash</div>
+                    </div>
+                    <!-- command -->
+                    <div class="scr-cmd-a">
+                      <div class="scr-cmd-l">COMMAND</div>
+                      <div class="scr-cmd-t">rm -rf /tmp/foo</div>
+                    </div>
+                    <!-- running indicator -->
+                    <div class="scr-running">RUNNING ✓</div>
+                    <!-- A/B buttons -->
+                    <div class="scr-act-row">
+                      <div class="scr-allow">
+                        <span class="scr-ai">✓</span>
+                        <span class="scr-al">A · ALLOW</span>
+                      </div>
+                      <div class="scr-deny">
+                        <span class="scr-ai">✗</span>
+                        <span class="scr-al">B · DENY</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="m5-btn-b" aria-hidden="true"></div>
+                <div class="m5-brand" aria-hidden="true">M5</div>
+              </div>
+            </div>
+
+            <!-- identity -->
+            <div class="mirror-id">
+              <div class="mirror-name">
+                <strong>gr0m</strong>
+                <code>Claude-A1B2</code>
+              </div>
+              <div class="mirror-pills">
+                <span class="pill" style="background:#eaf7ee;color:var(--success)">
+                  <span class="pdot" style="background:var(--success)" aria-hidden="true"></span>
+                  Encrypted
+                </span>
+                <span class="pill">87% &#128267;</span>
+                <span class="pill">4h 12m</span>
+                <span class="pill">&minus;58 dB</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- pet stats -->
+          <div class="card">
+            <div class="ch">
+              <span class="ch-t">Pet &middot; Level 5</span>
+              <span class="ch-h">+24% this week</span>
+            </div>
+            <div class="pet-body">
+              <div class="pet-sg">
+                <div class="st">
+                  <div class="st-l">Approved</div>
+                  <div class="st-v" style="color:var(--success)">42</div>
+                </div>
+                <div class="st">
+                  <div class="st-l">Denied</div>
+                  <div class="st-v" style="color:var(--danger)">3</div>
+                </div>
+                <div class="st">
+                  <div class="st-l">Napped</div>
+                  <div class="st-v" style="color:var(--info)">2h<span class="st-s">14m</span></div>
+                </div>
+              </div>
+              <div class="hdiv"></div>
+              <div class="pet-mr">
+                <span class="pet-ml">Fed</span>
+                <div class="pet-mt" role="meter" aria-label="Hunger: 7 out of 10" aria-valuenow="7" aria-valuemin="0" aria-valuemax="10">
+                  <div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--coral)"></div>
+                  <div class="pet-seg" style="background:var(--paper2)"></div>
+                  <div class="pet-seg" style="background:var(--paper2)"></div>
+                  <div class="pet-seg" style="background:var(--paper2)"></div>
+                </div>
+                <span class="pet-mv">7/10</span>
+              </div>
+              <div class="pet-mr">
+                <span class="pet-ml">Energy</span>
+                <div class="pet-mt" role="meter" aria-label="Energy: 4 out of 5" aria-valuenow="4" aria-valuemin="0" aria-valuemax="5">
+                  <div class="pet-seg" style="background:var(--success)"></div>
+                  <div class="pet-seg" style="background:var(--success)"></div>
+                  <div class="pet-seg" style="background:var(--success)"></div>
+                  <div class="pet-seg" style="background:var(--success)"></div>
+                  <div class="pet-seg" style="background:var(--paper2)"></div>
+                </div>
+                <span class="pet-mv">4/5</span>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /LEFT col -->
+
+        <!-- ════════════════════════
+             CENTER: stats + approvals + activity
+             ════════════════════════ -->
+        <div class="col">
+
+          <!-- today stats strip -->
+          <div class="card">
+            <div class="stats-strip">
+              <span class="ss-lbl">Today</span>
+              <span class="ss-h">since 12:00 AM PT</span>
+            </div>
+            <div class="stats-grid">
+              <div class="st">
+                <div class="st-l">Tokens</div>
+                <div class="st-v">184K<span class="st-s">out</span></div>
+              </div>
+              <div class="st">
+                <div class="st-l">Running</div>
+                <div class="st-v" style="color:var(--success)">3</div>
+              </div>
+              <div class="st">
+                <div class="st-l">Waiting</div>
+                <div class="st-v" style="color:var(--coral)">1</div>
+              </div>
+              <div class="st">
+                <div class="st-l">Sessions</div>
+                <div class="st-v">14</div>
+              </div>
+            </div>
+            <div class="spark-wrap">
+              <svg width="100%" height="40" viewBox="0 0 500 40" preserveAspectRatio="none" aria-label="Token usage trend — rising through the day" role="img">
+                <defs>
+                  <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#d97757" stop-opacity=".18"/>
+                    <stop offset="100%" stop-color="#d97757" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <!-- area fill -->
+                <polygon
+                  points="0,40 0,38 24,36 48,34 72,31 96,33 120,28 144,25 168,26 192,21 216,24 240,17 264,20 288,14 312,16 336,10 360,12 384,7 408,5 432,3 456,2 476,1 500,0 500,40"
+                  fill="url(#sg)"/>
+                <!-- line -->
+                <polyline
+                  points="0,38 24,36 48,34 72,31 96,33 120,28 144,25 168,26 192,21 216,24 240,17 264,20 288,14 312,16 336,10 360,12 384,7 408,5 432,3 456,2 476,1 500,0"
+                  fill="none" stroke="#d97757" stroke-width="2"
+                  stroke-linejoin="round" stroke-linecap="round"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- permission prompt card -->
+          <div class="card">
+            <div class="ch">
+              <span class="ch-t">Permission Prompt &middot; Live</span>
+              <span class="ch-h">approve here or on the stick</span>
+            </div>
+            <div class="appr-inner" role="alert" aria-live="polite">
+              <div class="appr-stripe" aria-hidden="true"></div>
+              <div class="appr-hdr">
+                <span class="appr-alert">&#9679; Awaiting approval</span>
+                <span class="appr-time">3s ago</span>
+              </div>
+              <div class="appr-tool">
+                <strong>Bash</strong>
+                <code class="appr-cmd">rm -rf /tmp/foo</code>
+              </div>
+              <div class="appr-btns">
+                <button class="btn-allow" aria-label="Allow this Bash tool call once">&#10003; Allow once</button>
+                <button class="btn-deny" aria-label="Deny this Bash tool call">&#10007; Deny</button>
+              </div>
+              <p class="appr-hint">Also: press A on the stick to allow, B to deny</p>
+            </div>
+          </div>
+
+          <!-- activity log -->
+          <div class="card act-card">
+            <div class="ch">
+              <span class="ch-t">Activity</span>
+              <span class="ch-h">newest first &middot; auto-syncs with stick</span>
+            </div>
+            <div class="act-scroll" role="log" aria-label="Claude activity log, newest first" aria-live="polite">
+              <div class="act-row">
+                <span class="act-t">10:42:18</span>
+                <span class="act-k" style="color:var(--info);background:rgba(63,110,168,.10)">tool</span>
+                <span class="act-tx">Bash &middot; git push origin main</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:41:42</span>
+                <span class="act-k" style="color:var(--info);background:rgba(63,110,168,.10)">tool</span>
+                <span class="act-tx">Bash &middot; yarn test</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:40:55</span>
+                <span class="act-k" style="color:var(--ink-dim);background:rgba(107,99,88,.10)">read</span>
+                <span class="act-tx">Reading src/main.cpp (lines 1024&ndash;1200)</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:39:31</span>
+                <span class="act-k" style="color:var(--success);background:rgba(46,158,91,.10)">edit</span>
+                <span class="act-tx">Edited src/buddies/gr0m.cpp</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:37:02</span>
+                <span class="act-k" style="color:var(--info);background:rgba(63,110,168,.10)">tool</span>
+                <span class="act-tx">Bash &middot; ls -la characters/</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:35:48</span>
+                <span class="act-k" style="color:var(--success);background:rgba(46,158,91,.10)">ok</span>
+                <span class="act-tx">Allowed: Bash &middot; pio run -t upload</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:32:11</span>
+                <span class="act-k" style="color:var(--ink);background:rgba(26,22,18,.06)">msg</span>
+                <span class="act-tx">Done. Next, let&rsquo;s wire the chest LCD.</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:28:55</span>
+                <span class="act-k" style="color:var(--ink-dim);background:rgba(107,99,88,.10)">read</span>
+                <span class="act-tx">Read REFERENCE.md</span>
+              </div>
+              <div class="act-row">
+                <span class="act-t">10:24:09</span>
+                <span class="act-k" style="color:var(--ink2);background:rgba(58,52,46,.08)">msg</span>
+                <span class="act-tx">&ldquo;can you make gr0m&rsquo;s mouth blow real smoke?&rdquo;</span>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /CENTER col -->
+
+        <!-- ════════════════════════
+             RIGHT: character + tools
+             ════════════════════════ -->
+        <div class="col">
+
+          <!-- active character -->
+          <div class="card">
+            <div class="ch"><span class="ch-t">Active Character</span></div>
+            <div class="char-prev">
+              <!-- gr0m SVG miniature -->
+              <div class="char-thumb" aria-hidden="true">
+                <svg viewBox="22 22 90 60" width="56" height="48"
+                     style="display:block;image-rendering:pixelated"
+                     shape-rendering="crispEdges" focusable="false" aria-hidden="true">
+                  <rect x="42" y="38" width="50" height="36" fill="#4a4d4c" rx="4"/>
+                  <rect x="40" y="32" width="54" height="46" fill="#c5c7c6" rx="6"/>
+                  <rect x="44" y="34" width="46" height="2" fill="#efefef"/>
+                  <rect x="46" y="44" width="42" height="14" fill="#0a0b0c"/>
+                  <rect x="47" y="45" width="40" height="12" fill="#00bdff"/>
+                  <rect x="65" y="47" width="3" height="8" fill="#fff"/>
+                  <rect x="59" y="66" width="16" height="1" fill="#7a7c7b"/>
+                  <rect x="59" y="68" width="16" height="1" fill="#7a7c7b"/>
+                  <line x1="67" y1="32" x2="67" y2="22" stroke="#7a7c7b" stroke-width="1.5"/>
+                  <circle cx="67" cy="22" r="3" fill="none" stroke="#7a7c7b" stroke-width="1"/>
+                  <polygon points="64,77 70,77 73,85 61,85" fill="#7a7c7b"/>
+                  <rect x="45" y="85" width="44" height="22" fill="#c5c7c6" rx="3"/>
+                  <polygon points="69,89 65,89 64,96 67,96 65,103 71,94 68,94 70,89" fill="#00bdff"/>
+                </svg>
+              </div>
+              <div class="char-info">
+                <strong>gr0m</strong>
+                <p>ASCII &middot; 3D head &middot; accel parallax</p>
+              </div>
+              <span class="pill" style="background:#eaf7ee;color:var(--success)">
+                <span class="pdot" style="background:var(--success)" aria-hidden="true"></span>
+                Active
+              </span>
+            </div>
+            <div class="char-btns">
+              <button class="btn-g" aria-label="Previous character">&larr; prev</button>
+              <button class="btn-g" aria-label="Next character">next &rarr;</button>
+              <button class="btn-p" aria-label="Open character switcher">Switch&hellip;</button>
+            </div>
+          </div>
+
+          <!-- character library -->
+          <div class="card" style="flex:1">
+            <div class="ch">
+              <span class="ch-t">Character Library</span>
+              <span class="ch-h">18 installed &middot; 1.4 / 1.8 MB</span>
+            </div>
+            <div class="char-lib" role="list" aria-label="Installed character packs">
+
+              <!-- gr0m — active -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb active" style="background:#11161e" aria-label="gr0m — active character" tabindex="0">
+                  <svg viewBox="20 24 95 64" width="60" height="44"
+                       style="display:block;image-rendering:pixelated"
+                       shape-rendering="crispEdges" focusable="false" aria-hidden="true">
+                    <rect x="42" y="38" width="50" height="36" fill="#4a4d4c" rx="4"/>
+                    <rect x="40" y="32" width="54" height="46" fill="#c5c7c6" rx="6"/>
+                    <rect x="44" y="34" width="46" height="2" fill="#efefef"/>
+                    <rect x="46" y="44" width="42" height="14" fill="#0a0b0c"/>
+                    <rect x="47" y="45" width="40" height="12" fill="#00bdff"/>
+                    <rect x="65" y="47" width="3" height="8" fill="#fff"/>
+                    <rect x="59" y="66" width="16" height="1" fill="#7a7c7b"/>
+                    <rect x="59" y="68" width="16" height="1" fill="#7a7c7b"/>
+                    <line x1="67" y1="32" x2="67" y2="22" stroke="#7a7c7b" stroke-width="1.5"/>
+                    <circle cx="67" cy="22" r="3" fill="#00bdff"/>
+                    <polygon points="64,77 70,77 73,85 61,85" fill="#7a7c7b"/>
+                    <rect x="45" y="85" width="44" height="22" fill="#c5c7c6" rx="3"/>
+                    <polygon points="69,89 65,89 64,96 67,96 65,103 71,94 68,94 70,89" fill="#00bdff"/>
+                  </svg>
+                </div>
+                <span class="sp-name active">gr0m</span>
+              </div>
+
+              <!-- bufo -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#0c1108;color:#6b8e23;font-size:18px" aria-label="bufo character" tabindex="0">@_@</div>
+                <span class="sp-name">bufo</span>
+              </div>
+
+              <!-- duck -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#1a140a;color:#ffd60a;font-size:16px" aria-label="duck character" tabindex="0">&lt;o)</div>
+                <span class="sp-name">duck</span>
+              </div>
+
+              <!-- cat -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#1a0e0a;color:#e8b074;font-size:11px" aria-label="cat character" tabindex="0">(=^^)</div>
+                <span class="sp-name">cat</span>
+              </div>
+
+              <!-- ghost -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#0e1018;color:#cbd5e8;font-size:16px" aria-label="ghost character" tabindex="0">~o~</div>
+                <span class="sp-name">ghost</span>
+              </div>
+
+              <!-- cactus -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#0a140e;color:#5dc26b;font-size:16px" aria-label="cactus character" tabindex="0">#|#</div>
+                <span class="sp-name">cactus</span>
+              </div>
+
+              <!-- dragon -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#180a0a;color:#c83a3a;font-size:14px" aria-label="dragon character" tabindex="0">&gt;:D</div>
+                <span class="sp-name">dragon</span>
+              </div>
+
+              <!-- octopus -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#180a14;color:#e84a8c;font-size:12px" aria-label="octopus character" tabindex="0">~()~</div>
+                <span class="sp-name">octopus</span>
+              </div>
+
+              <!-- robot -->
+              <div class="sp-tile" role="listitem">
+                <div class="sp-thumb" style="background:#11161e;color:#a3b3d6;font-size:13px" aria-label="robot character" tabindex="0">[oo]</div>
+                <span class="sp-name">robot</span>
+              </div>
+
+            </div><!-- /char-lib -->
+
+            <!-- drop zone -->
+            <div class="char-drop"
+                 role="button"
+                 tabindex="0"
+                 aria-label="Drop a character folder to install a new character pack"
+                 onkeydown="if(event.key==='Enter'||event.key===' ')this.click()">
+              <div class="char-drop-plus" aria-hidden="true">&#65291;</div>
+              <div class="char-drop-t">Drop a character folder</div>
+              <div class="char-drop-s">GIFs + manifest.json &middot; &le; 1.8 MB</div>
+            </div>
+          </div>
+
+          <!-- device tools -->
+          <div class="card">
+            <div class="ch"><span class="ch-t">Device Tools</span></div>
+            <div class="tools-l">
+              <button class="tool-btn">
+                <i class="ti" aria-hidden="true">&#9000;</i>
+                <span>Rename device</span>
+                <span class="tarr" aria-hidden="true">&rarr;</span>
+              </button>
+              <button class="tool-btn">
+                <i class="ti" aria-hidden="true">&#128100;</i>
+                <span>Set owner name</span>
+                <span class="tarr" aria-hidden="true">&rarr;</span>
+              </button>
+              <button class="tool-btn">
+                <i class="ti" aria-hidden="true">&#9114;</i>
+                <span>Capture screen</span>
+                <span class="tarr" aria-hidden="true">&rarr;</span>
+              </button>
+              <button class="tool-btn">
+                <i class="ti" aria-hidden="true">&#8635;</i>
+                <span>Reboot</span>
+                <span class="tarr" aria-hidden="true">&rarr;</span>
+              </button>
+              <div class="hdiv"></div>
+              <button class="tool-btn danger">
+                <i class="ti" aria-hidden="true">&#8855;</i>
+                <span>Forget &middot; unpair</span>
+                <span class="tarr" aria-hidden="true">&rarr;</span>
+              </button>
+              <button class="tool-btn danger">
+                <i class="ti" aria-hidden="true">&#9888;</i>
+                <span>Factory reset</span>
+                <span class="tarr" aria-hidden="true">&rarr;</span>
+              </button>
+            </div>
+          </div>
+
+        </div><!-- /RIGHT col -->
+      </div><!-- /bw-body -->
+    </div><!-- /bw -->
+  </div><!-- /window-stage -->
+</main>
+
+<footer class="page-footer">
+  <p>
+    <a href="https://github.com/MichaelAdamGroberman/claude-dev-hardware" rel="noopener noreferrer">claude-dev-hardware</a>
+    &middot; M5StickC Plus &middot; gr0m &middot; Claude Desktop Hardware Buddy
+  </p>
+  <p style="margin-top:6px">
+    Flash with <code style="font-family:'JetBrains Mono',monospace">pio run -t upload</code>
+    after dropping firmware-patch files into src/
+  </p>
+</footer>
+
+</body>
+</html>
