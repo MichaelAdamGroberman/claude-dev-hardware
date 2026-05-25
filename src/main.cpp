@@ -1588,30 +1588,31 @@ static void tinyHeart(int x, int y, bool filled, uint16_t col) {
 // content starts at y=88 to leave 16 px for the title row.
 static void drawPetStats(const Palette& p) {
   const int TOP = 70;
-  // Warm orange for the LV pill (design). Named LV_ORANGE to avoid colliding
-  // with the M5 In_eSPI `ORANGE` macro (0xFDA0).
-  const uint16_t LV_ORANGE = 0xFD20;
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
 
   // ── LV CHIP ─────────────────────────────────────────────────────
-  // Orange pill chip per the design, with black text for contrast (the chip
-  // colour is fixed orange rather than the per-character body tint so the
-  // level badge reads the same across every buddy palette).
+  // Orange pill chip per the design, with black text for contrast. The chip
+  // colour is the FIXED design-system orange (DS_ORANGE, #ff8c1a) — the same
+  // accent the list-menu selection and USAGE hero use — not the per-character
+  // body tint, so the level badge reads the same across every buddy palette.
   int y = 88;
-  spr.fillRoundRect(6, y, 46, 18, 3, LV_ORANGE);
-  spr.setTextSize(1);
-  spr.setTextColor(0x0000, LV_ORANGE);
+  spr.fillRoundRect(6, y, 46, 18, 3, DS_ORANGE);
+  spr.setTextSize(FS_SUB);
+  spr.setTextColor(DS_BLACK, DS_ORANGE);
   spr.setCursor(11, y + 5);
   spr.print("LV");
-  spr.setTextSize(2);
-  spr.setTextColor(0x0000, LV_ORANGE);
+  spr.setTextSize(FS_BODY);
+  spr.setTextColor(DS_BLACK, DS_ORANGE);
   spr.setCursor(26, y + 2);
   spr.printf("%u", stats().level);
-  spr.setTextSize(1);
+  spr.setTextSize(FS_SUB);
 
   // ── FED METER ───────────────────────────────────────────────────
+  // Label is a fixed dim caption (DS_DIM) beside a body-size value — the same
+  // label/value treatment the USAGE info page uses, so the eye reads it the
+  // same here. The value + dot fill stay on the per-character body tint.
   y = 112;
-  spr.setTextColor(p.textDim, p.bg);
+  spr.setTextColor(DS_DIM, p.bg);
   spr.setCursor(6, y);
   spr.print("FED");
   uint8_t fed = statsFedProgress();
@@ -1637,16 +1638,19 @@ static void drawPetStats(const Palette& p) {
   if (pct < 0) pct = 0; if (pct > 100) pct = 100;
   bool usb      = vBus_mV > 4000;
   bool charging = usb && iBat_mA > 1;
-  uint16_t batCol = (pct >= 50) ? 0x07E0 : (pct >= 20) ? 0xFFE0 : HOT;
+  // Fixed design-system status accents (green ok / amber mid / red low) so the
+  // battery reads the same colour story as the header battery glyph and the
+  // DEVICE/USAGE pages, independent of the buddy skin.
+  uint16_t batCol = (pct >= 50) ? DS_GREEN : (pct >= 20) ? DS_AMBER : DS_REDSOFT;
 
-  spr.setTextSize(1);
-  spr.setTextColor(p.textDim, p.bg);
+  spr.setTextSize(FS_SUB);
+  spr.setTextColor(DS_DIM, p.bg);
   spr.setCursor(6, y);
   spr.print("BATTERY");
   // Mode badge on the right of the label row — right-aligned with 4 px margin.
   const char* badge = charging ? "CHG" : (usb ? "USB" : nullptr);
   if (badge) {
-    spr.setTextColor(charging ? 0xFFE0 : 0x05FF, p.bg);
+    spr.setTextColor(charging ? DS_AMBER : DS_CYAN, p.bg);
     spr.setCursor(W - 4 - (int)strlen(badge) * 6, y);
     spr.print(badge);
   }
@@ -1672,16 +1676,18 @@ static void drawPetStats(const Palette& p) {
   // ── 2×2 STAT GRID — APPROVED / DENIED / TOKENS / NAPPED ─────────
   y = 178;
   const int COL2 = 72;
+  // Each cell: a fixed dim caption (DS_DIM) over a body-size value in its
+  // fixed status accent — same label/value pattern as the USAGE OK/NO block.
   auto cell = [&](int cx, int cy, const char* label, uint16_t labelCol, uint16_t valCol, const char* fmt, uint32_t v) {
-    spr.setTextSize(1);
+    spr.setTextSize(FS_SUB);
     spr.setTextColor(labelCol, p.bg);
     spr.setCursor(cx, cy);
     spr.print(label);
-    spr.setTextSize(2);
+    spr.setTextSize(FS_BODY);
     spr.setTextColor(valCol, p.bg);
     spr.setCursor(cx, cy + 10);
     spr.printf(fmt, (unsigned long)v);
-    spr.setTextSize(1);
+    spr.setTextSize(FS_SUB);
   };
 
   // Token short formatter — returns char* in caller-owned buffer
@@ -1695,37 +1701,37 @@ static void drawPetStats(const Palette& p) {
   };
 
   // Row 1
-  cell(6,    y, "APPROVED", p.textDim, 0x07E0, "%lu", stats().approvals);
-  cell(COL2, y, "DENIED",   p.textDim, HOT,    "%lu", stats().denials);
+  cell(6,    y, "APPROVED", DS_DIM, DS_GREEN,   "%lu", stats().approvals);
+  cell(COL2, y, "DENIED",   DS_DIM, DS_REDSOFT, "%lu", stats().denials);
 
   // Row 2 — TOKENS, NAPPED
   y += 32;
   char tbuf[12];
-  spr.setTextSize(1);
-  spr.setTextColor(p.textDim, p.bg);
+  spr.setTextSize(FS_SUB);
+  spr.setTextColor(DS_DIM, p.bg);
   spr.setCursor(6, y);
   spr.print("TOKENS");
   spr.setTextColor(p.text, p.bg);
-  spr.setTextSize(2);
+  spr.setTextSize(FS_BODY);
   spr.setCursor(6, y + 10);
   spr.print(tokStr(tbuf, sizeof(tbuf), stats().tokens));
-  spr.setTextSize(1);
+  spr.setTextSize(FS_SUB);
 
   uint32_t nap = stats().napSeconds;
-  spr.setTextColor(p.textDim, p.bg);
+  spr.setTextColor(DS_DIM, p.bg);
   spr.setCursor(COL2, y);
   spr.print("NAPPED");
-  spr.setTextSize(2);
-  spr.setTextColor(0x05FF, p.bg);
+  spr.setTextSize(FS_BODY);
+  spr.setTextColor(DS_CYAN, p.bg);
   spr.setCursor(COL2, y + 10);
   spr.printf("%luh%02lu", nap / 3600, (nap / 60) % 60);
-  spr.setTextSize(1);
+  spr.setTextSize(FS_SUB);
 }
 
 static void drawPetHowTo(const Palette& p) {
   const int TOP = 70;
   spr.fillRect(0, TOP, W, H - TOP, p.bg);
-  int y = TOP + 14;            // room for the PET header drawn by drawPet()
+  int y = TOP + 18;            // clear the PET header strip drawn by drawPet()
   // Same Font 2 style the Info paragraph pages use — 8×16 px proportional,
   // ~16 chars/line on a 135 px screen, pitch 14 leaves a touch of air.
   auto ln = [&](uint16_t c, const char* s) {
@@ -1791,9 +1797,46 @@ static void drawPetShowcase(const Palette& p) {
   }
 }
 
+// Pet header strip — the same dark band + hairlines + FS_HEADER title look the
+// Info pages get from _infoHeader, so PET reads as part of the redesigned set
+// (canvas screen 4: dark header, pet/owner title, page counter) instead of the
+// old bare floating title. Sits in the band just under the peeked character
+// (rows 0..70) and above the page body (LV chip / how-to copy start at y=88).
+static void drawPetHeader(const Palette& p) {
+  const int HY = 70, HH = 16;
+  spr.fillRect(0, HY, W, HH, DS_DARK);
+  spr.drawFastHLine(0, HY, W, DS_LINE);
+  spr.drawFastHLine(0, HY + HH, W, DS_LINE);
+
+  // Title = pet name, or "owner's pet" when an owner is set and differs. Size 2
+  // (HEADER) fits ~10 chars; longer owner names step down to the SUB caption
+  // size so they don't wrap out of the 135 px strip — same rule as before.
+  char title[40];
+  const char* owner = ownerName();
+  if (owner[0] && strcasecmp(owner, petName()) != 0) {
+    snprintf(title, sizeof(title), "%s's %s", owner, petName());
+  } else {
+    snprintf(title, sizeof(title), "%s", petName());
+  }
+  bool small = strlen(title) > 10;
+  spr.setTextSize(small ? FS_SUB : FS_HEADER);
+  spr.setTextColor(DS_WHITE, DS_DARK);
+  // size-2 title (16 px) sits flush at the band top so it stays inside the
+  // 16 px strip; the size-1 fallback is centred.
+  spr.setCursor(6, small ? HY + 4 : HY);
+  spr.print(title);
+
+  // Page counter at SUB, right-aligned — matches the "n/total" caption the
+  // Info / list headers carry.
+  char pb[8]; snprintf(pb, sizeof(pb), "%u/%u", petPage + 1, PET_PAGES);
+  spr.setTextSize(FS_SUB);
+  spr.setTextColor(DS_DIM, DS_DARK);
+  spr.setCursor(W - 6 - (int)strlen(pb) * 6, HY + 4);
+  spr.print(pb);
+}
+
 void drawPet() {
   const Palette& p = characterPalette();
-  int y = 70;
 
   // The showcase page draws only a bottom chrome band over the peeked,
   // stage-cycling character — no full-screen page, no top title row (which
@@ -1803,24 +1846,8 @@ void drawPet() {
   if (petPage == 0) drawPetStats(p);
   else drawPetHowTo(p);
 
-  // Header on top of whichever page drew — title only (no page counter).
-  // Dynamic size: size 2 (12 px/char) fits ~10 chars at x=4 on the 135 px
-  // screen. Longer owner names (e.g. "Claude Code's gr0m" = 17 chars)
-  // would wrap to a second line at size 2, so fall back to size 1
-  // (6 px/char, ~21 chars fit) before that happens.
-  char title[40];
-  const char* owner = ownerName();
-  // If the owner name matches the pet's name (e.g. owner "gr0m" + the gr0m
-  // species), skip the redundant "gr0m's gr0m" and just show the name.
-  if (owner[0] && strcasecmp(owner, petName()) != 0) {
-    snprintf(title, sizeof(title), "%s's %s", owner, petName());
-  } else {
-    snprintf(title, sizeof(title), "%s", petName());
-  }
-  spr.setTextSize(strlen(title) <= 10 ? 2 : 1);
-  spr.setTextColor(p.text, p.bg);
-  spr.setCursor(4, y + 2);
-  spr.print(title);
+  // Header strip on top of whichever page drew.
+  drawPetHeader(p);
 }
 
 // WiFi status block (top-right corner). Shows whenever the WiFi
