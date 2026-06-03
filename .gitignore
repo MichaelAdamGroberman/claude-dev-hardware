@@ -1,0 +1,9 @@
+.pio/
+.vscode/
+.DS_Store
+data/
+.claude/
+
+# python
+__pycache__/
+*.pyc

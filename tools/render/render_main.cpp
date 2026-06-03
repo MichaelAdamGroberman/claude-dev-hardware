@@ -1,0 +1,90 @@
+// Host harness: renders the REAL gr0m character (src/buddies/gr0m.cpp via
+// src/buddy.cpp) into a framebuffer and writes a PPM. Lets us preview any
+// state / evolution stage / scale off-device, pixel-faithful to the firmware.
+//
+//   ./gr0m_render <stage 0-5> <state 0-6> <scale 1|2> <out.ppm>
+//   state: 0=sleep 1=idle 2=busy 3=attention 4=celebrate 5=dizzy 6=heart
+//   scale: 2=home (big), 1=peek (mini)
+#include "M5StickCPlus.h"
+#include "buddy.h"
+#include <cstdio>
+#include <cstdlib>
+
+static const int SW = 135, SH = 240;
+static uint16_t FB[SW * SH];
+
+// Standalone scene entry points exposed by gr0m.cpp (outside its namespace),
+// mirroring how the firmware's main loop drives them. stage 9 = alt
+// human-costume easter egg; stage 8 = DJ booth scene (gr0mRenderDJ).
+extern void gr0mRenderHumanCostume(TFT_eSPI* tgt, uint32_t t);
+extern void gr0mRenderDJ(TFT_eSPI* tgt, uint32_t t);
+
+// Globals normally owned by main.cpp.
+TFT_eSprite spr;
+_M5Device   M5;
+unsigned long _grender_clock_ms = 0;   // fake millis() the harness advances per frame
+uint8_t  g_evoStage   = 5;
+uint32_t g_dispTokens = 123456;
+
+// Host stubs for the mic audio-reactivity feed that gr0m.cpp's DJ scene
+// consumes (mic.h). The real bodies live in src/mic.cpp (I2S/PDM hardware),
+// which the off-device renderer does NOT compile. With the mic reported as
+// disabled, the DJ scene takes its synthetic 124-BPM FALLBACK path — exactly
+// what we want to render-check off device.
+void    micSpectrum(uint8_t out[7]) { for (int i = 0; i < 7; i++) out[i] = 0; }
+uint8_t micLevel()                  { return 0; }
+bool    micBeat()                   { return false; }
+bool    micEnabled()                { return false; }
+
+static void writePPM(const char* path) {
+  FILE* f = fopen(path, "wb");
+  if (!f) { perror("fopen"); exit(1); }
+  fprintf(f, "P6\n%d %d\n255\n", SW, SH);
+  for (int i = 0; i < SW * SH; i++) {
+    uint16_t c = FB[i];
+    unsigned char r = (unsigned char)(((c >> 11) & 0x1F) * 255 / 31);
+    unsigned char g = (unsigned char)(((c >> 5)  & 0x3F) * 255 / 63);
+    unsigned char b = (unsigned char)(( c        & 0x1F) * 255 / 31);
+    fputc(r, f); fputc(g, f); fputc(b, f);
+  }
+  fclose(f);
+}
+
+int main(int argc, char** argv) {
+  int stage = argc > 1 ? atoi(argv[1]) : 5;
+  int state = argc > 2 ? atoi(argv[2]) : 1;
+  int scale = argc > 3 ? atoi(argv[3]) : 2;
+  const char* out = argc > 4 ? argv[4] : "out.ppm";
+  int frame = argc > 5 ? atoi(argv[5]) : 0;   // animation frame (advances tickCount)
+
+  spr.setFB(FB, SW, SH);
+  buddyInit();
+  buddySetSpecies("gr0m");
+  g_evoStage = (uint8_t)stage;
+  buddySetPeek(scale == 1);
+  for (int i = 0; i < SW * SH; i++) FB[i] = 0x0000;   // device bg = black
+  buddyInvalidate();
+  if (stage == 9) {
+    // Preview the alt human-costume easter egg directly via its standalone
+    // entry point (mirrors how the firmware loop calls it), bypassing
+    // buddyTick / the mood-state table. Advance the fake clock so the mouth
+    // twitch + steam animate up to `frame`.
+    _grender_clock_ms = (unsigned long)frame * 200UL;
+    spr.fillSprite(0x0000);
+    gr0mRenderHumanCostume(&spr, (uint32_t)_grender_clock_ms);
+  } else if (stage == 8) {
+    // Preview the DJ-booth scene directly via gr0mRenderDJ (mirrors main.cpp's
+    // djTick), bypassing the mood-state table. The DJ gear gates on evoStage,
+    // so render it as a fully-evolved (Stage 5) bot. micEnabled() is false in
+    // the host stubs, so this exercises the synthetic 124-BPM FALLBACK path.
+    g_evoStage = 5;
+    _grender_clock_ms = (unsigned long)frame * 200UL;
+    spr.fillSprite(0x0000);
+    gr0mRenderDJ(&spr, (uint32_t)_grender_clock_ms);
+  } else {
+    // Advance the fake clock so buddyTick ticks the animation up to `frame`.
+    for (int i = 0; i <= frame; i++) { _grender_clock_ms = (unsigned long)i * 200UL; buddyTick((uint8_t)state); }
+  }
+  writePPM(out);
+  return 0;
+}
