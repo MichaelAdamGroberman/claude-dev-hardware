@@ -64,13 +64,13 @@ for setup details see **[tools/cc-bridge/README.md](tools/cc-bridge/README.md)**
   Code transcripts and pushes it to the device for display. Approvals and
   denials are tracked per period alongside it.
 - **Character evolution + on-device menus.** The gr0m mascot assembles itself
-  across five lifetime-usage milestones (1M → 250M tokens) — from a bare head to
+  across five lifetime-usage milestones (250K → 1.25M tokens) — from a bare head to
   the full rig (flat-shaded early, dynamically lit once mature). On-device
   menus, opened with a long-press of **A** on the matching info page, cover a
   **Connection** screen (WiFi / BT / Off / Adapter) and a **Usage** screen
   (reporting window, plus reset-counters and reset-buddy-level).
 - **DJ mode** — the end-game upgrade. It's **not** a toggle: once the character
-  reaches the final evolution stage (Stage 5, 250M lifetime tokens) it breaks
+  reaches the final evolution stage (Stage 5, 1.25M lifetime tokens) it breaks
   into a full-detail DJ-booth scene on its own (turntables, mixer, VU-meter
   visor, headphones, note particles on an internal beat) — during celebrations
   and the occasional idle flourish. Earned, not switched on.

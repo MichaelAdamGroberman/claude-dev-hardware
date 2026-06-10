@@ -8,7 +8,7 @@ over one of four transports, chosen by environment:
   BUDDY_LISTEN "0.0.0.0:6401"            → device dials in (WiFi+VPN)
   BUDDY_HOST   "192.168.1.20:6400"       → dial the device (WiFi LAN)
   (none)                                 → BLE (scans for Claude*)
-  BUDDY_TOKEN  shared token for the TCP transports
+  BUDDY_TOKEN  required shared token for the TCP transports
   BUDDY_OWNER  on-screen name ("CLI")
   BUDDY_TOKEN_PERIOD  day|week|month|all (default day) — token usage window
 
@@ -113,6 +113,10 @@ class BuddyLink:
         self.transport = ("serial" if self._serial_port
                           else "tcp-listen" if self._listen
                           else "tcp" if self._host else "ble")
+        if self.transport in ("tcp", "tcp-listen") and not self._token:
+            log("configuration error: BUDDY_TOKEN is required when "
+                "BUDDY_HOST or BUDDY_LISTEN is set")
+            raise SystemExit(2)
 
         self.client = None          # BleakClient
         self.device = None          # BLEDevice
@@ -524,14 +528,13 @@ class BuddyLink:
         except Exception as exc:
             log(f"tcp connect failed: {exc}"); return False
         self._tcp_reader, self._tcp_writer = reader, writer
-        if self._token:
-            writer.write((self._token + "\n").encode()); await writer.drain()
-            try:
-                auth = await asyncio.wait_for(reader.readline(), timeout=5)
-            except asyncio.TimeoutError:
-                log("tcp auth timeout"); await self._tcp_close(); return False
-            if b'"ok"' not in auth:
-                log("tcp auth rejected"); await self._tcp_close(); return False
+        writer.write((self._token + "\n").encode()); await writer.drain()
+        try:
+            auth = await asyncio.wait_for(reader.readline(), timeout=5)
+        except asyncio.TimeoutError:
+            log("tcp auth timeout"); await self._tcp_close(); return False
+        if b'"ok"' not in auth:
+            log("tcp auth rejected"); await self._tcp_close(); return False
         asyncio.create_task(self._tcp_read_pump())
         await self._send_initial()
         log(f"tcp linked: {self._host}")
@@ -564,7 +567,7 @@ class BuddyLink:
                 tok = (await asyncio.wait_for(reader.readline(), timeout=5)).decode().strip()
             except Exception:
                 writer.close(); return
-            if self._token and tok != self._token:
+            if tok != self._token:
                 log(f"dial-in auth failed from {peer}"); writer.close(); return
             if self.is_connected():
                 writer.close(); return

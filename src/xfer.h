@@ -11,7 +11,13 @@ static File     _xFile;
 static uint32_t _xExpected = 0, _xWritten = 0;
 static char     _xCharName[24] = "";
 static bool     _xActive = false;
+static bool     _xFileOpen = false;
 static uint32_t _xTotal = 0, _xTotalWritten = 0;
+static const char* _X_CHARS_DIR = "/characters";
+static const char* _X_STAGE_DIR = "/.char_stage";
+
+void characterClose();
+bool characterInit(const char* name);
 
 // Ack goes to both streams — we don't track which one delivered the command,
 // and writes to a clientless SerialBT just drop. The bridge listens on
@@ -23,6 +29,27 @@ static void _xAck(const char* what, bool ok, uint32_t n = 0) {
   bleWrite((const uint8_t*)b, len);
 }
 
+static const char* _xBaseName(const char* path) {
+  const char* slash = strrchr(path, '/');
+  return slash ? slash + 1 : path;
+}
+
+static bool _xSafePathComponent(const char* s) {
+  if (!s || !*s || strcmp(s, ".") == 0 || strstr(s, "..")) return false;
+  for (const char* p = s; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c < 0x20 || c == '/' || c == '\\') return false;
+  }
+  return true;
+}
+
+static void _xCloseFile() {
+  if (_xFileOpen) {
+    _xFile.close();
+    _xFileOpen = false;
+  }
+}
+
 static uint32_t _xWipeDir(const char* dir) {
   File d = LittleFS.open(dir);
   if (!d || !d.isDirectory()) { LittleFS.mkdir(dir); return 0; }
@@ -31,7 +58,7 @@ static uint32_t _xWipeDir(const char* dir) {
   while (f) {
     freed += f.size();
     char p[80];
-    snprintf(p, sizeof(p), "%s/%s", dir, f.name());
+    snprintf(p, sizeof(p), "%s/%s", dir, _xBaseName(f.name()));
     f.close();
     LittleFS.remove(p);
     f = d.openNextFile();
@@ -44,24 +71,96 @@ static uint32_t _xWipeDir(const char* dir) {
 // under a different name would otherwise leave the old one's files eating
 // space. Wipe everything under /characters/, return total bytes reclaimed.
 static uint32_t _xWipeAllChars() {
-  File root = LittleFS.open("/characters");
-  if (!root || !root.isDirectory()) { LittleFS.mkdir("/characters"); return 0; }
+  File root = LittleFS.open(_X_CHARS_DIR);
+  if (!root || !root.isDirectory()) { LittleFS.mkdir(_X_CHARS_DIR); return 0; }
   uint32_t freed = 0;
   File sub = root.openNextFile();
   while (sub) {
+    const char* name = _xBaseName(sub.name());
     if (sub.isDirectory()) {
       char p[64];
-      snprintf(p, sizeof(p), "/characters/%s", sub.name());
+      snprintf(p, sizeof(p), "%s/%s", _X_CHARS_DIR, name);
       sub.close();
       freed += _xWipeDir(p);
       LittleFS.rmdir(p);
     } else {
+      char p[64];
+      snprintf(p, sizeof(p), "%s/%s", _X_CHARS_DIR, name);
+      freed += sub.size();
       sub.close();
+      LittleFS.remove(p);
     }
     sub = root.openNextFile();
   }
   root.close();
   return freed;
+}
+
+static void _xCleanupStage() {
+  _xWipeDir(_X_STAGE_DIR);
+  LittleFS.rmdir(_X_STAGE_DIR);
+}
+
+static void _xAbortTransfer() {
+  _xCloseFile();
+  _xActive = false;
+  _xCharName[0] = 0;
+  _xExpected = _xWritten = 0;
+  _xTotal = _xTotalWritten = 0;
+  _xCleanupStage();
+}
+
+static bool _xPrepareStage() {
+  _xCleanupStage();
+  return LittleFS.mkdir(_X_STAGE_DIR);
+}
+
+static bool _xValidateStagedManifest() {
+  char mpath[64];
+  snprintf(mpath, sizeof(mpath), "%s/manifest.json", _X_STAGE_DIR);
+  File mf = LittleFS.open(mpath, "r");
+  if (!mf) return false;
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, mf);
+  mf.close();
+  if (err) return false;
+  JsonObject states = doc["states"];
+  return !states.isNull();
+}
+
+static bool _xCommitStagedChar() {
+  char finalDir[64];
+  snprintf(finalDir, sizeof(finalDir), "%s/%s", _X_CHARS_DIR, _xCharName);
+
+  File d = LittleFS.open(_X_STAGE_DIR);
+  if (!d || !d.isDirectory()) return false;
+  char names[40][32];
+  uint8_t n = 0;
+  File f = d.openNextFile();
+  while (f) {
+    if (n >= 40) { f.close(); d.close(); return false; }
+    const char* bn = _xBaseName(f.name());
+    strncpy(names[n], bn, sizeof(names[n]) - 1);
+    names[n][sizeof(names[n]) - 1] = 0;
+    n++;
+    f.close();
+    f = d.openNextFile();
+  }
+  d.close();
+
+  characterClose();
+  _xWipeAllChars();
+  LittleFS.mkdir(_X_CHARS_DIR);
+  if (!LittleFS.mkdir(finalDir)) return false;
+
+  for (uint8_t i = 0; i < n; i++) {
+    char src[80], dst[96];
+    snprintf(src, sizeof(src), "%s/%s", _X_STAGE_DIR, names[i]);
+    snprintf(dst, sizeof(dst), "%s/%s", finalDir, names[i]);
+    if (!LittleFS.rename(src, dst)) return false;
+  }
+  LittleFS.rmdir(_X_STAGE_DIR);
+  return true;
 }
 
 // Called from data.h when incoming JSON has a "cmd" key. Returns true if
@@ -332,34 +431,25 @@ inline bool xferCommand(JsonDocument& doc) {
 
   if (strcmp(cmd, "char_begin") == 0) {
     const char* name = doc["name"] | "pet";
-    _xTotal = doc["total"] | 0;
+    uint32_t newTotal = doc["total"] | 0;
+    if (_xActive) _xAbortTransfer();
+    _xTotal = newTotal;
 
-    // Fit check: free space after wiping everything under /characters/.
-    // Do the math before touching the filesystem so a failed check leaves
-    // the current character intact.
-    uint32_t free = LittleFS.totalBytes() - LittleFS.usedBytes();
-    uint32_t reclaimable = 0;
-    {
-      File r = LittleFS.open("/characters");
-      if (r && r.isDirectory()) {
-        File s = r.openNextFile();
-        while (s) {
-          if (s.isDirectory()) {
-            File f = s.openNextFile();
-            while (f) { reclaimable += f.size(); f.close(); f = s.openNextFile(); }
-          }
-          s.close(); s = r.openNextFile();
-        }
-        r.close();
-      }
+    if (!_xSafePathComponent(name) || strlen(name) >= sizeof(_xCharName)) {
+      _xAck("char_begin", false);
+      return true;
     }
+
+    // Safe staging: the active character remains in /characters while the new
+    // pack lands in _X_STAGE_DIR. If there isn't enough current free space for
+    // the staged pack, reject without touching the installed character.
+    uint32_t free = LittleFS.totalBytes() - LittleFS.usedBytes();
     // Headroom for LittleFS metadata overhead — it's not byte-for-byte.
-    uint32_t available = free + reclaimable;
-    if (_xTotal > 0 && _xTotal + 4096 > available) {
+    if (_xTotal > 0 && _xTotal + 4096 > free) {
       char b[96];
       int len = snprintf(b, sizeof(b),
         "{\"ack\":\"char_begin\",\"ok\":false,\"n\":%lu,\"error\":\"need %luK, have %luK\"}\n",
-        (unsigned long)available, (unsigned long)(_xTotal/1024), (unsigned long)(available/1024)
+        (unsigned long)free, (unsigned long)(_xTotal/1024), (unsigned long)(free/1024)
       );
       Serial.write(b, len);
       bleWrite((const uint8_t*)b, len);
@@ -367,11 +457,13 @@ inline bool xferCommand(JsonDocument& doc) {
     }
 
     strncpy(_xCharName, name, sizeof(_xCharName)-1); _xCharName[sizeof(_xCharName)-1]=0;
-    characterClose();
-    _xWipeAllChars();
-    char dir[48]; snprintf(dir, sizeof(dir), "/characters/%s", _xCharName);
-    LittleFS.mkdir(dir);
+    if (!_xPrepareStage()) {
+      _xCharName[0] = 0;
+      _xAck("char_begin", false);
+      return true;
+    }
     _xTotalWritten = 0;
+    _xExpected = _xWritten = 0;
     _xActive = true;
     _xAck("char_begin", true);
     return true;
@@ -383,22 +475,47 @@ inline bool xferCommand(JsonDocument& doc) {
     const char* path = doc["path"];
     _xExpected = doc["size"] | 0;
     _xWritten = 0;
-    if (!path) { _xAck("file", false); return true; }
-    char full[80]; snprintf(full, sizeof(full), "/characters/%s/%s", _xCharName, path);
+    if (_xFileOpen || !_xSafePathComponent(path) ||
+        (_xTotal > 0 && _xExpected > 0 && _xTotalWritten + _xExpected > _xTotal)) {
+      _xAbortTransfer();
+      _xAck("file", false);
+      return true;
+    }
+    char full[80]; snprintf(full, sizeof(full), "%s/%s", _X_STAGE_DIR, path);
     _xFile = LittleFS.open(full, "w");
-    _xAck("file", (bool)_xFile);
+    _xFileOpen = (bool)_xFile;
+    if (!_xFileOpen) _xAbortTransfer();
+    _xAck("file", _xFileOpen);
     return true;
   }
 
   if (strcmp(cmd, "chunk") == 0) {
     const char* b64 = doc["d"];
-    if (!b64 || !_xFile) { _xAck("chunk", false); return true; }
+    if (!b64 || !_xFileOpen) {
+      uint32_t n = _xWritten;
+      _xAbortTransfer();
+      _xAck("chunk", false, n);
+      return true;
+    }
     uint8_t buf[300];
     size_t outLen = 0;
     int rc = mbedtls_base64_decode(buf, sizeof(buf), &outLen,
                                    (const uint8_t*)b64, strlen(b64));
-    if (rc != 0) { _xAck("chunk", false); return true; }
-    _xFile.write(buf, outLen);
+    if (rc != 0 ||
+        (_xExpected > 0 && _xWritten + outLen > _xExpected) ||
+        (_xTotal > 0 && _xTotalWritten + outLen > _xTotal)) {
+      uint32_t n = _xWritten;
+      _xAbortTransfer();
+      _xAck("chunk", false, n);
+      return true;
+    }
+    size_t wr = _xFile.write(buf, outLen);
+    if (wr != outLen) {
+      uint32_t n = _xWritten;
+      _xAbortTransfer();
+      _xAck("chunk", false, n);
+      return true;
+    }
     _xWritten += outLen;
     _xTotalWritten += outLen;
     // Ack every chunk — LittleFS writes can block on flash erase and the
@@ -408,17 +525,31 @@ inline bool xferCommand(JsonDocument& doc) {
   }
 
   if (strcmp(cmd, "file_end") == 0) {
-    bool ok = _xFile && (_xWritten == _xExpected || _xExpected == 0);
-    if (_xFile) _xFile.close();
-    _xAck("file_end", ok, _xWritten);
+    bool ok = _xFileOpen && (_xWritten == _xExpected || _xExpected == 0);
+    uint32_t n = _xWritten;
+    _xCloseFile();
+    if (!ok) _xAbortTransfer();
+    _xAck("file_end", ok, n);
     return true;
   }
 
   if (strcmp(cmd, "char_end") == 0) {
+    bool ok = false;
+    if (_xFileOpen) {
+      _xAbortTransfer();
+      _xAck("char_end", false);
+      return true;
+    }
+    if (_xValidateStagedManifest() && _xCommitStagedChar()) {
+      ok = characterInit(_xCharName);
+    }
     _xActive = false;
-    bool ok = characterInit(_xCharName);
     extern bool buddyMode, gifAvailable;
     if (ok) { buddyMode = false; gifAvailable = true; speciesIdxSave(0xFF); }
+    else _xCleanupStage();
+    _xCharName[0] = 0;
+    _xExpected = _xWritten = 0;
+    _xTotal = _xTotalWritten = 0;
     _xAck("char_end", ok);
     return true;
   }

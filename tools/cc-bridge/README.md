@@ -8,7 +8,7 @@ Three pieces:
 | Process | What it does |
 |---|---|
 | `buddy_bridged.py` | Long-running daemon. Holds one link to the device (serial / BLE / WiFi), exposes a Unix socket at `~/.cache/claude-buddy/buddy.sock` for local clients. |
-| `buddy_prompt.py` | One-shot PreToolUse hook. Reads the tool call from stdin, asks the daemon, prints `{"decision":"approve"}` or `{"decision":"block",…}` back to Claude Code. |
+| `buddy_prompt.py` | One-shot PreToolUse hook. Reads the tool call from stdin, mirrors input-required questions display-only, and asks the daemon for binary approve/deny only in ask-permission/default mode. |
 | `gr0m_mcp.py` | MCP server (stdio). Lets Claude **control/query** the device — status, notify, radio mode, owner, token usage, and **GPIO / logic-analyzer** — via tools. Thin client of the daemon socket. See [gr0m MCP server](#gr0m-mcp-server). |
 
 ## Install
@@ -46,8 +46,8 @@ claude-code ── PreToolUse hook ──► buddy_prompt.py
                                        │  A=approve / B=deny on physical buttons
                                        ▼
                                   Hook resolves
-                                  → {"decision":"approve"}   → tool runs
-                                  → {"decision":"block",...} → tool blocked
+                                  → permissionDecision:"allow" → tool runs
+                                  → permissionDecision:"deny"  → tool blocked
                                   → timeout / no daemon      → silent passthrough
                                                                 (Claude shows
                                                                  its own prompt)
@@ -56,6 +56,12 @@ claude-code ── PreToolUse hook ──► buddy_prompt.py
 The bridge tags every prompt with `src:"cli"` so the firmware can render a
 small `cli` badge in the alarm bar — that's how you tell a Claude Code
 prompt apart from a desktop app prompt at a glance.
+
+The hook only sends binary approval prompts to the device when Claude Code is
+running in ask-permission/default mode. Auto-run modes such as `acceptEdits`,
+`bypassPermissions`, and `plan` pass through silently. `AskUserQuestion` still
+mirrors the question text to the device as display-only because the actual
+choice is made in Claude Code.
 
 ## Transports — serial / local BT / WiFi / VPN
 
@@ -175,11 +181,12 @@ Settings → `adapter` to enter, **BtnB** (or a reset) to exit.
 The daemon computes **output-token usage** over the selected window
 (`day`/`week`/`month`/`all`) from your Claude Code transcripts
 (`~/.claude/projects/**/*.jsonl`) and pushes it to the device every
-heartbeat as `{"cmd":"tokens","set":N}` — the firmware shows it on the chest
-LCD/stats (in-memory, so no NVS wear). `gr0m_token_reset` records a
-baseline and the counter restarts from zero. Period + reset state persists
-in `~/.cache/claude-buddy/token_state.json`; the default window is set with
-`BUDDY_TOKEN_PERIOD` on the daemon.
+heartbeat as `{"cmd":"tokens","set":N,"life":N,"ok":N,"deny":N}`. The
+firmware shows the period count on the chest LCD/stats, while lifetime drives
+level/evolution and ok/deny show the current-period approval tally.
+`gr0m_token_reset` records a baseline and the counter restarts from zero.
+Period + reset state persists in `~/.cache/claude-buddy/token_state.json`;
+the default window is set with `BUDDY_TOKEN_PERIOD` on the daemon.
 
 ## Failure modes
 

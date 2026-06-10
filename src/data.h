@@ -160,15 +160,23 @@ static void _applyJson(const char* line, TamaState* out) {
   if (m) { strncpy(out->msg, m, sizeof(out->msg)-1); out->msg[sizeof(out->msg)-1]=0; }
   JsonArray la = doc["entries"];
   if (!la.isNull()) {
+    char incoming[8][92];
     uint8_t n = 0;
     for (JsonVariant v : la) {
       if (n >= 8) break;
       const char* s = v.as<const char*>();
-      strncpy(out->lines[n], s ? s : "", 91); out->lines[n][91]=0;
+      strncpy(incoming[n], s ? s : "", 91); incoming[n][91]=0;
       n++;
     }
-    if (n != out->nLines || (n > 0 && strcmp(out->lines[n-1], out->msg) != 0)) {
+    bool changed = (n != out->nLines);
+    for (uint8_t i = 0; !changed && i < n; i++) {
+      if (strcmp(incoming[i], out->lines[i]) != 0) changed = true;
+    }
+    if (changed) {
       out->lineGen++;
+    }
+    for (uint8_t i = 0; i < n; i++) {
+      strncpy(out->lines[i], incoming[i], 91); out->lines[i][91]=0;
     }
     out->nLines = n;
   }

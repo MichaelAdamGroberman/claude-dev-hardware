@@ -6,16 +6,17 @@ Buddy device to approve or deny a tool call.
 Claude Code hook contract:
   - stdin: JSON describing the tool call ({tool_name, tool_input, …})
   - exit 0 with no stdout = pass through (Claude shows its own prompt)
-  - stdout JSON with {"decision":"approve"|"block","reason":"…"}
-    overrides the default and tells Claude what to do
+  - stdout JSON with hookSpecificOutput.permissionDecision set to
+    "allow" or "deny" overrides the default and tells Claude what to do
 
 We talk to buddy_bridged.py over its Unix socket, wait for the user to
 press A (approve) or B (deny) on the device, and translate that into the
 hook's response format.
 
 Behavior:
-  - device approves → {"decision":"approve"} (Claude runs the tool)
-  - device denies  → {"decision":"block","reason":"denied on Hardware Buddy"}
+  - input-required tools (AskUserQuestion) are mirrored display-only
+  - ask-permission/default mode asks the device for binary approve/deny
+  - auto-run modes pass through silently
   - timeout / no device → exit 0 with no output (Claude falls back to its
     own confirmation prompt, so you're never locked out if the device
     is offline)
@@ -33,6 +34,22 @@ SOCK_PATH = Path.home() / ".cache" / "claude-buddy" / "buddy.sock"
 # 30s "approve?" timer. Override per-tool by setting BUDDY_TIMEOUT in the
 # hook environment.
 DEFAULT_TIMEOUT_S = 30
+INPUT_REQUIRED_TOOLS = {"AskUserQuestion"}
+ASK_PERMISSION_MODES = {
+    "ask",
+    "askpermission",
+    "askpermissions",
+    "askforpermission",
+    "default",
+}
+
+
+def _mode_key(mode: object) -> str:
+    return "".join(ch for ch in str(mode or "").lower() if ch.isalnum())
+
+
+def _is_ask_permission_mode(mode: object) -> bool:
+    return _mode_key(mode) in ASK_PERMISSION_MODES
 
 
 def _clearprompt_device() -> None:
@@ -137,28 +154,24 @@ def main() -> int:
     # AskUserQuestion is a 2-4 option question, not a binary approve/deny, so the
     # device's A/B buttons can't answer it. Mirror the question text to the screen
     # (display-only) and pass through, leaving the actual choice to Claude's
-    # terminal picker. Not gated by permission_mode — questions always prompt.
-    if tool_name == "AskUserQuestion":
+    # terminal picker. Not gated by permission_mode — questions always need input.
+    if tool_name in INPUT_REQUIRED_TOOLS:
         qs = tool_input.get("questions") or []
         if qs and isinstance(qs[0], dict):
             _show_message(str(qs[0].get("question", "") or qs[0].get("header", "")))
         return 0
 
-    # Only wake the device when the user's approval is actually required. In
-    # modes that auto-run the tool there is nothing to decide, so pass through
-    # silently (no device prompt). Check both field spellings to be safe, and
-    # log what Claude Code actually sends so the gating can be verified.
+    # Only wake the device when ask-permission/default mode is active. Modes
+    # such as acceptEdits, bypassPermissions, and plan auto-run this hook path
+    # from the device's point of view, so pass through silently.
     mode = payload.get("permission_mode") or payload.get("permissionMode") or ""
     try:
         with (Path.home() / ".cache" / "claude-buddy" / "hook-debug.log").open("a") as _f:
             _f.write(f"{tool_name}\tmode={mode!r}\n")
     except Exception:
         pass
-    EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
-    if mode in ("bypassPermissions", "plan"):
-        return 0                                   # nothing requires approval
-    if mode == "acceptEdits" and tool_name in EDIT_TOOLS:
-        return 0                                   # edits auto-accepted
+    if not _is_ask_permission_mode(mode):
+        return 0
 
     # Auto-approved by an allow rule → Claude runs it without prompting, so the
     # device shouldn't show a phantom approval that has no on-screen counterpart.

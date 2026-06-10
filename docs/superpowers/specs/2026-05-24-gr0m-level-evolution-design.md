@@ -84,11 +84,11 @@ Stage 0.
 | Stage | Unlocks at (lifetime tokens) | Adds | Reads as |
 |---|---|---|---|
 | **0 Spark** | 0 | head cube + visor eyes, flat-shaded | a lone chip-head, just booted |
-| **1 Frame** | 1,000,000 | + neck cube + chest cube + mouth | torso assembles, gains a mouth |
-| **2 Powered** | 5,000,000 | + chest bolt + antenna LED | recognizably gr0m, powered on |
-| **3 Persona** | 25,000,000 | + sunglasses | the signature attitude |
-| **4 HUD** | 100,000,000 | + mood particles + chest-LCD readout + dynamic per-face lighting/specular | polished, "alive, counting" |
-| **5 Ascended** | 250,000,000 | + state costumes (nightcap, headphones/laptop, party hat, confetti, heart cloud, speech bubble) | the full current design |
+| **1 Frame** | 250,000 | + neck cube + chest cube + mouth | torso assembles, gains a mouth |
+| **2 Powered** | 500,000 | + chest bolt + antenna LED | recognizably gr0m, powered on |
+| **3 Persona** | 750,000 | + sunglasses | the signature attitude |
+| **4 HUD** | 1,000,000 | + mood particles + chest-LCD readout + dynamic per-face lighting/specular | polished, "alive, counting" |
+| **5 Ascended** | 1,250,000 | + state costumes (nightcap, headphones/laptop, party hat, confetti, heart cloud, speech bubble) | the full current design |
 
 **Confirmed judgment calls:**
 
@@ -167,7 +167,7 @@ Two surfaces show usage:
 - **On the pet (chest-LCD):** the period token figure (existing behavior), now
   sourced from `periodTokens`.
 - **USAGE info page (new — see Part 5):** period tokens, `OK / NO` counts, `level`,
-  and `Stage x/5 →next` (e.g. `Stage 3/5 →100M`). This page also hosts the
+  and `Stage x/5 →next` (e.g. `Stage 3/5 →1M`). This page also hosts the
   timespan + reset controls.
 
 `level` continues to display as today (now lifetime-derived).

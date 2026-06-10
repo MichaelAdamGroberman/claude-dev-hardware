@@ -34,7 +34,7 @@ TOOLS = [
          "token usage. Returns periodTokens (usage in the current reporting window), "
          "lifetimeTokens (all-time output tokens minus any level reset), level "
          "(lifetimeTokens // 50000, monotonically climbing), evoStage (0–5 based on "
-         "lifetime milestones 1M/5M/25M/100M/250M — drives the character's visual "
+         "lifetime milestones 250K/500K/750K/1M/1.25M — drives the character's visual "
          "evolution), approved and denied (permission-prompt counts in the current "
          "window), and period (the active reporting window: day/week/month/all)."
      ),
