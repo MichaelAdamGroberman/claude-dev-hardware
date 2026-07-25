@@ -33,11 +33,12 @@ import subprocess
 import shutil
 import sys
 import tempfile
+import time
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCENARIOS = ["ble_hang", "ble_ok", "watchdog", "liveness_dead",
-             "liveness_alive"]
+             "liveness_alive", "status_nonblocking"]
 
 
 # ── fakes ────────────────────────────────────────────────────────────────
@@ -186,6 +187,83 @@ async def _liveness(answers: bool) -> tuple[bool, str]:
     if linked < 2:
         return False, f"torn down but never relinked (BLE linked x{linked})"
     return True, f"half-dead link torn down {torn}x and relinked"
+
+
+async def s_status_nonblocking() -> tuple[bool, str]:
+    """An {"op":"status"} must not stall the event loop.
+
+    period_tokens() globs and reads every transcript line-by-line on EVERY
+    status call, and with period="all" the mtime filter skips nothing -- so it
+    re-reads the whole corpus. Run on the event loop that freezes prompts,
+    heartbeats and liveness acks for the duration; observed 2026-07-25 as
+    gr0m_status timing out while prompts still worked.
+    """
+    install_bleak(make_client(answers=True), make_scanner())
+    bridge = load_bridge()
+
+    SLOW_S = 2.0
+    bridge.BuddyLink.period_tokens = lambda self: (time.sleep(SLOW_S) or 0)
+
+    stop = asyncio.Event()
+    ticks = []
+
+    async def monitor():
+        # Record BEFORE checking stop: the tick that lands right after a stall
+        # is the one that reveals it, and checking stop first drops exactly
+        # that sample -- which silently made this scenario unfalsifiable.
+        loop = asyncio.get_running_loop()
+        while True:
+            ticks.append(loop.time())
+            if stop.is_set():
+                return
+            await asyncio.sleep(0.05)
+
+    bridge.SOCK_DIR.mkdir(parents=True, exist_ok=True)
+    daemon = asyncio.create_task(bridge.main())
+    for _ in range(100):                       # wait for the socket to bind
+        if bridge.SOCK_PATH.exists():
+            break
+        await asyncio.sleep(0.1)
+    else:
+        daemon.cancel()
+        return False, "daemon never bound its socket"
+
+    mon = asyncio.create_task(monitor())
+    await asyncio.sleep(0.3)                   # collect a clean baseline
+    try:
+        reader, writer = await asyncio.open_unix_connection(
+            str(bridge.SOCK_PATH))
+        t0 = asyncio.get_running_loop().time()
+        writer.write(b'{"op":"status"}\n')
+        await writer.drain()
+        raw = await asyncio.wait_for(reader.readline(), timeout=30)
+        call_s = asyncio.get_running_loop().time() - t0
+        writer.close()
+    finally:
+        stop.set()
+        await mon
+        daemon.cancel()
+
+    # Without these the scenario is unfalsifiable: a handler that errors out
+    # closes the connection, readline returns b"", nothing ever stalls, and the
+    # test "passes" having measured nothing.
+    try:
+        reply = json.loads(raw.decode())
+    except Exception:
+        return False, f"status returned no usable reply ({raw!r})"
+    if "transport" not in reply:
+        return False, f"status reply missing fields: {reply}"
+    if call_s < SLOW_S * 0.9:
+        return False, (f"status returned in {call_s:.2f}s -- the slow "
+                       f"period_tokens patch never ran, so nothing was tested")
+
+    gaps = [b - a for a, b in zip(ticks, ticks[1:])]
+    worst = max(gaps) if gaps else 0.0
+    if worst > SLOW_S / 2:
+        return False, (f"event loop stalled {worst:.2f}s during one status "
+                       f"call -- prompts and acks are frozen that whole time")
+    return True, (f"loop stayed responsive (worst gap {worst:.2f}s) while a "
+                  f"{call_s:.1f}s status call ran")
 
 
 async def s_liveness_dead() -> tuple[bool, str]:

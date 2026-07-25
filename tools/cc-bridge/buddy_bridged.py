@@ -776,7 +776,13 @@ async def handle_client(link: BuddyLink, reader, writer) -> None:
             writer.write(b'{"error":"bad json"}\n'); await writer.drain(); return
         op = req.get("op")
         if op == "status":
-            period_tokens = link.period_tokens()
+            # Off-thread, like the heartbeat already does: period_tokens()
+            # globs and reads every transcript line-by-line on EVERY call, and
+            # with period="all" the mtime filter skips nothing, so it re-reads
+            # the whole corpus. Run inline it freezes prompts, heartbeats and
+            # liveness acks for as long as the scan takes -- which grows
+            # without bound as transcripts accumulate.
+            period_tokens = await asyncio.to_thread(link.period_tokens)
             life = link.lifetime_tokens()
             ok, deny = link.approved_denied()
             resp = {
