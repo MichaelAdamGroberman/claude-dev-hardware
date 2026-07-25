@@ -197,6 +197,24 @@ the default window is set with `BUDDY_TOKEN_PERIOD` on the daemon.
   through to Claude's prompt.
 - **User doesn't press A or B** → 30 s timeout (configurable in
   `buddy_prompt.py`). Hook falls through.
+- **Daemon up but delivering nothing** → check `~/.cache/claude-buddy/buddy.log`
+  for a `scanning for Claude* (5 s)…` line with *no outcome after it*. That was
+  a deadlocked reconnector (fixed; see `test_reconnect.py`). Also check for
+  `CBATTErrorDomain Code=15 "Encryption is insufficient"` — the NUS
+  characteristic needs a bond, so the link is up but unpaired. Re-pair, or use
+  serial, which needs no bond.
+
+## Tests
+
+`test_reconnect.py` covers the connect / reconnect / liveness paths offline —
+no hardware and no BLE adapter, via a fake `bleak` and a throwaway `$HOME`.
+
+```bash
+./test_reconnect.py              # all scenarios + summary
+./test_reconnect.py ble_hang     # one scenario
+```
+
+The other `tools/test_*.py` scripts are hardware-in-the-loop; this one is not.
 
 ## Run as a launchd service (macOS)
 

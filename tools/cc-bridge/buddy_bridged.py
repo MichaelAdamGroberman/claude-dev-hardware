@@ -47,6 +47,32 @@ PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 HEARTBEAT_S = 10
 DEFAULT_PROMPT_TIMEOUT_S = 30
+# CoreBluetooth's connectPeripheral: has no timeout by design -- it stays
+# pending until the peripheral shows up -- and bleak inherits that. Left
+# unbounded it parks the reconnector task forever (see _ble_connect).
+BLE_CONNECT_TIMEOUT_S = 20
+# Backstop over the whole connect path, whatever the transport. Must exceed the
+# worst-case sum of the inner timeouts (BLE: 5s discover + 20 + 20 + initial
+# send) or it will abort attempts that were about to succeed. Env override
+# exists so the tests can exercise the watchdog without a 90s wait.
+def _watchdog_seconds() -> float:
+    """Parse defensively: this runs at import, so a typo'd env var would
+    otherwise raise before the daemon ever starts and leave KeepAlive
+    restarting it forever."""
+    raw = os.environ.get("BUDDY_CONNECT_WATCHDOG_S", "").strip()
+    try:
+        value = float(raw) if raw else 90.0
+    except ValueError:
+        value = 90.0
+    return value if value > 0 else 90.0
+
+
+RECONNECT_WATCHDOG_S = _watchdog_seconds()
+# A link that stops answering probes is dead even if the transport still claims
+# otherwise; tolerate this many consecutive misses before tearing it down.
+MAX_MISSED_PROBES = 3
+# Must stay below HEARTBEAT_S so one probe finishes before the next is due.
+LIVENESS_PROBE_TIMEOUT_S = 5
 
 # Evolution stage milestones (lifetime tokens → stage). All five stages are
 # reachable through normal leveling: Stages 1–4 every ~5 levels (250K) and
@@ -105,6 +131,8 @@ class BuddyLink:
         self._query_lock = asyncio.Lock()
         self._rx_buf = bytearray()
         self._owner = os.environ.get("BUDDY_OWNER", "CLI")
+        # Consecutive unanswered liveness probes; see _probe_liveness.
+        self._missed_probes = 0
 
         self._serial_port = os.environ.get("BUDDY_SERIAL", "").strip()
         self._host   = os.environ.get("BUDDY_HOST", "").strip()
@@ -351,8 +379,18 @@ class BuddyLink:
         return self.device.name if self.device else None
 
     async def connect(self) -> bool:
-        if self.transport == "serial":
-            return await self._serial_connect()
+        if self._serial_port:
+            # BUDDY_SERIAL is a *preference*, not a pin: the USB node vanishes
+            # whenever the cable is pulled, and a hard pin turns that into a
+            # permanent crash-loop that looks identical to "device offline".
+            # Re-decide on every attempt so an unplugged cable degrades to BLE
+            # and a replugged one is picked back up on the next reconnect.
+            if os.path.exists(self._serial_port):
+                self.transport = "serial"
+                if await self._serial_connect():
+                    return True
+            self.transport = "ble"
+            return await self._ble_connect()
         if self.transport == "tcp":
             return await self._tcp_connect()
         if self.transport == "tcp-listen":
@@ -360,6 +398,9 @@ class BuddyLink:
         return await self._ble_connect()
 
     async def _send_initial(self) -> None:
+        # Every transport funnels through here on a successful link, so it is
+        # the one place a fresh connection resets the probe counter.
+        self._missed_probes = 0
         now = int(time.time())
         tz = -time.timezone if time.daylight == 0 else -time.altzone
         await self._send_json({"time": [now, tz]})
@@ -471,10 +512,32 @@ class BuddyLink:
         self.device = cands[0]
         self.client = BleakClient(self.device.address)
         try:
-            await self.client.connect()
-        except Exception as exc:
-            log(f"BLE connect failed: {exc}"); return False
-        await self.client.start_notify(NUS_TX, lambda _c, d: self._feed(bytes(d)))
+            # Bounded: a peripheral that accepts the link but stalls the GATT
+            # handshake would otherwise park this coroutine for the life of the
+            # process, and the reconnector that awaits it is the only thing that
+            # can ever restore the link.
+            await asyncio.wait_for(self.client.connect(),
+                                   timeout=BLE_CONNECT_TIMEOUT_S)
+            await asyncio.wait_for(
+                self.client.start_notify(
+                    NUS_TX, lambda _c, d: self._feed(bytes(d))),
+                timeout=BLE_CONNECT_TIMEOUT_S)
+        except (Exception, asyncio.TimeoutError) as exc:
+            # str(TimeoutError()) is "" -- fall back to the class name so the
+            # log never shows a bare "BLE connect failed:".
+            log(f"BLE connect failed: {exc or type(exc).__name__}"
+                if str(exc) else
+                f"BLE connect failed: {type(exc).__name__} "
+                f"after {BLE_CONNECT_TIMEOUT_S}s")
+            # Drop the half-open client: bleak reports .is_connected True while
+            # the handshake is still stalled, which makes is_connected() lie and
+            # the daemon look healthy while it delivers nothing.
+            try:
+                await asyncio.wait_for(self.client.disconnect(), timeout=5)
+            except Exception:
+                pass
+            self.client = None
+            return False
         await self._send_initial()
         log(f"BLE linked: {self.device.name}")
         return True
@@ -659,6 +722,37 @@ class BuddyLink:
                     log(f"lifetime rescan failed: {exc}")
                 await self._send_json({"total": 0, "running": 0, "waiting": 0, "msg": ""})
                 await self.push_tokens()
+                await self._probe_liveness()
+
+    async def _probe_liveness(self) -> None:
+        """Judge the link by round-trips, not by what the transport claims.
+
+        bleak reports .is_connected True for links that no longer carry data --
+        on 2026-07-25 the heartbeat was logging "write failed: disconnected"
+        while is_connected() still said True, so the reconnector's
+        `if not link.is_connected()` never fired and the link stayed dead. The
+        firmware answers {"cmd":"status"} with {"ack":"status"} on every
+        transport, which makes it a cheap true round-trip.
+        """
+        reply = await self.query({"cmd": "status"}, ack="status",
+                                 timeout=LIVENESS_PROBE_TIMEOUT_S)
+        if not reply.get("error"):
+            self._missed_probes = 0
+            return
+        self._missed_probes += 1
+        log(f"liveness probe unanswered "
+            f"({self._missed_probes}/{MAX_MISSED_PROBES})")
+        if self._missed_probes < MAX_MISSED_PROBES:
+            return
+        log("link unresponsive — tearing down so the reconnector can retake it")
+        self._missed_probes = 0
+        try:
+            await asyncio.wait_for(self.disconnect(), timeout=10)
+        except Exception:
+            pass
+        # Drop the client outright rather than re-reading .is_connected: the
+        # whole point of this path is that the flag cannot be trusted.
+        self.client = None
 
     async def disconnect(self) -> None:
         if self.transport in ("tcp", "tcp-listen"):
@@ -800,7 +894,25 @@ async def main() -> None:
         backoff = 2
         while True:
             if not link.is_connected():
-                if await link.connect():
+                # Watchdog: this task is the ONLY thing that can restore the
+                # link, so it must never be allowed to park. An unbounded await
+                # anywhere under connect() would otherwise kill reconnection for
+                # the life of the process -- silently, with the process still up
+                # and KeepAlive satisfied.
+                try:
+                    ok = await asyncio.wait_for(link.connect(),
+                                                timeout=RECONNECT_WATCHDOG_S)
+                except Exception as exc:
+                    log(f"connect attempt aborted: {type(exc).__name__} "
+                        f"after {RECONNECT_WATCHDOG_S:g}s")
+                    # Tear down whatever half-open state the aborted attempt
+                    # left behind, bounded so cleanup can't park us either.
+                    try:
+                        await asyncio.wait_for(link.disconnect(), timeout=10)
+                    except Exception:
+                        pass
+                    ok = False
+                if ok:
                     backoff = 2
                 else:
                     await asyncio.sleep(backoff); backoff = min(backoff * 2, 60); continue
